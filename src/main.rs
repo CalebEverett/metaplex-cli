@@ -60,6 +60,9 @@ use crate::config::Config;
 pub mod output;
 use output::{println_display, CliMetadata, CliMint, CliTokenAmount, UiMetadata};
 
+pub mod storage;
+use storage::*;
+
 pub(crate) type Error = Box<dyn std::error::Error>;
 type CommandResult = Result<Option<(u64, Vec<Vec<Instruction>>)>, Error>;
 
@@ -609,7 +612,7 @@ fn get_app() -> App<'static, 'static> {
                         .long("max-supply")
                         .value_name("MAX_SUPPLY")
                         .takes_value(true)
-                        .validator(|s| is_parsable::<u64>(s))
+                        .validator(is_parsable::<u64>)
                         .default_value("1")
                         .help("Specify maximum allowable supply for master edition."),
                 ),
@@ -630,6 +633,26 @@ fn get_app() -> App<'static, 'static> {
                         .index(1)
                         .required(true)
                         .help("The token address"),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("storage")
+                .arg(
+                    Arg::with_name("provider")
+                        .long("provider")
+                        .value_name("PROVIDER")
+                        .takes_value(true)
+                        .possible_values(&["arweave", "ipfs"])
+                        .default_value("arweave")
+                        .help("Specify storage provider."),
+                )
+                .subcommand(
+                    SubCommand::with_name("price").arg(
+                        Arg::with_name("bytes")
+                            .value_name("BYTES")
+                            .takes_value(true)
+                            .validator(is_parsable::<u32>),
+                    ),
                 ),
         );
     app_matches
@@ -796,6 +819,19 @@ async fn main() {
 
             command_create_token(&config, &data)
         }
+
+        ("storage", Some(arg_matches)) => {
+            let (sub_sub_command, sub_arg_matches) = arg_matches.subcommand();
+            let provider_str = arg_matches.value_of("provider").unwrap();
+            match (sub_sub_command, sub_arg_matches) {
+                ("price", Some(sub_sub_arg_matches)) => {
+                    let bytes = value_t!(sub_sub_arg_matches, "bytes", u32).unwrap();
+                    command_get_price(provider_str, bytes, &config).await
+                }
+                _ => unreachable!(),
+            }
+        }
+
         _ => unreachable!(),
     }
     // Note that transaction_info is expected to contain batches of instructions so that related
@@ -1292,6 +1328,19 @@ fn command_mint(
         )?]
     };
     Ok(Some((0, vec![instructions])))
+}
+
+async fn command_get_price(provider_str: &str, bytes: u32, config: &Config) -> CommandResult {
+    let provider = storage::get_provider(provider_str)?;
+    let price = provider.get_price(1024).await?;
+    println_display(
+        config,
+        format!(
+            "The price to upload {} bytes to {} is {} {}.",
+            bytes, provider.name, price, provider.units
+        ),
+    );
+    Ok(None)
 }
 
 #[cfg(test)]

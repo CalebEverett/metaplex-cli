@@ -165,17 +165,18 @@ Creators: 2
 ```
 
 ## Todo
-1. Add individual commands for minting tokens and creating master editions
-1. Display edition info
-1. Create and update from json files
-1. Integration tests
-1. Bulkify
-1. Upload to storage
-1. Vault
-1. Auction
-1. Candy Store
-1. Fractionalization
-1. Custom Edition Metadata
+- [ ] Add individual commands for minting tokens and creating master editions
+- [ ] Display edition info
+- [ ] Create and update from json files
+- [ ] Integration tests
+- [ ] Bulkify
+- [ ] Upload to storage
+- [ ] Vault
+- [ ] Auction
+- [ ] Candy Store
+- [ ] Fractionalization
+- [ ] Custom Edition Metadata
+- [ ] Remote Wallet
 
 ## Implementation Details
 
