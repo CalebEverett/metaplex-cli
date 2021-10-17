@@ -705,7 +705,7 @@ async fn main() {
 
     let _ = match (sub_command, sub_matches) {
         ("mint-info", Some(arg_matches)) => {
-            let address = pubkey_of(arg_matches, "address").unwrap();
+            let address = pubkey_of(arg_matches, "mint_address").unwrap();
             command_mint_info(&config, address)
         }
         ("metadata-info", Some(arg_matches)) => {

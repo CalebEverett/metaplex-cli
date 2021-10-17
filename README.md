@@ -3,7 +3,7 @@
 
 # Metaplex Command Line Interface
 
-This a command line interface for creating and managing non-fungible tokens on the [Solana blockchain](https://solana.com/) through the [Metaplex programs](https://metaplex.com/).
+This is a command line interface for creating and managing non-fungible tokens on the [Solana blockchain](https://solana.com/) through the [Metaplex programs](https://metaplex.com/).
 
 ## Implemented commands
 
