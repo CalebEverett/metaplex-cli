@@ -3,7 +3,7 @@ use console::Emoji;
 use serde::{Deserialize, Serialize};
 use solana_account_decoder::parse_token::{UiMint, UiTokenAmount};
 use solana_cli_output::{display::writeln_name_value, OutputFormat, QuietDisplay, VerboseDisplay};
-use spl_token_metadata::state::{Creator, Data, Key, Metadata};
+use metaplex_token_metadata::state::{Creator, Data, Key, Metadata};
 use std::fmt;
 
 pub type StringAmount = String;

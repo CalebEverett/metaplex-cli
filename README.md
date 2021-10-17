@@ -1,9 +1,9 @@
-[![build status](https://github.com/CalebEverett/metaplex/actions/workflows/rust-cli.yml/badge.svg)](https://github.com/CalebEverett/metaplex/actions/workflows/rust-cli.yml)
+[![build status](https://github.com/CalebEverett/metaplex-cli/actions/workflows/build.yml/badge.svg)](https://github.com/CalebEverett/metaplex-cli/actions/workflows/build.yml)
 
 
 # Metaplex Command Line Interface
 
-This is a starting point to develop command line applications that interact with the metaplex programs. It includes output features and cli tooling from the [Solana token program cli](https://github.com/solana-labs/solana-program-library/tree/master/token/cli/src), including the ability to produce output for display or json, either normal or compact, and use default values from solana-cli local config. Also makes use of [solana-clap-utils](https://github.com/solana-labs/solana/tree/master/clap-utils) for efficient validation and argument parsing.
+This a command line interface for creating and managing non-fungible tokens on the [Solana blockchain](https://solana.com/) through the [Metaplex programs](https://metaplex.com/).
 
 ## Implemented commands
 
@@ -172,3 +172,7 @@ Creators: 2
 6. Candy Store
 6. Fractionalization
 7. Custom Edition Metadata
+
+## Implementation Details
+
+ The command line interface includes output features and cli tooling from the [Solana token program cli](https://github.com/solana-labs/solana-program-library/tree/master/token/cli/src), including the ability to produce output for display or json, either normal or compact, and use default values from solana-cli local config. It also makes use of [solana-clap-utils](https://github.com/solana-labs/solana/tree/master/clap-utils) for efficient validation and argument parsing.

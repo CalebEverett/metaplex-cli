@@ -42,7 +42,7 @@ use spl_token::{
     self,
     state::{Account, Mint},
 };
-use spl_token_metadata::{
+use metaplex_token_metadata::{
     self,
     error::MetadataError,
     instruction::{create_master_edition, create_metadata_accounts, update_metadata_accounts},
@@ -224,7 +224,7 @@ fn parse_cli_metadata(address: Pubkey, metadata: Metadata) -> CliMetadata {
     }
 }
 fn get_metadata_address(mint_address: &Pubkey) -> Pubkey {
-    let program_id = spl_token_metadata::id();
+    let program_id = metaplex_token_metadata::id();
 
     let seeds = &[
         PREFIX.as_bytes(),
@@ -263,7 +263,7 @@ impl FetchParse<Metadata> for Metadata {
     }
     /// Returns metadata address
     fn calc_associated_address(mint_address: &Pubkey, _: Option<&Pubkey>) -> Pubkey {
-        let program_id = spl_token_metadata::id();
+        let program_id = metaplex_token_metadata::id();
         let seeds = &[
             PREFIX.as_bytes(),
             program_id.as_ref(),
@@ -293,7 +293,7 @@ trait MasterEditionCalc<T> {
 
 impl MasterEditionCalc<Mint> for Mint {
     fn calc_master_edition(mint_address: &Pubkey) -> Pubkey {
-        let program_id = spl_token_metadata::id();
+        let program_id = metaplex_token_metadata::id();
         let seeds = &[
             PREFIX.as_bytes(),
             program_id.as_ref(),
@@ -876,7 +876,7 @@ fn get_filtered_program_accounts(config: &Config, address: Pubkey) -> CommandRes
     };
     let accounts = config
         .rpc_client
-        .get_program_accounts_with_config(&spl_token_metadata::id(), method_config)
+        .get_program_accounts_with_config(&metaplex_token_metadata::id(), method_config)
         .map_err(|_| format!("Could not find metadata account {}", address))
         .unwrap();
     println!("{:?}", accounts);
@@ -925,7 +925,7 @@ fn command_metadata_create(
     println_display(config, format!("Creating metadata {}", metadata_address));
 
     let instructions = vec![create_metadata_accounts(
-        spl_token_metadata::id(),
+        metaplex_token_metadata::id(),
         metadata_address,
         mint_address,
         mint_authority,
@@ -1012,7 +1012,7 @@ fn command_metadata_update_account(
         .get_minimum_balance_for_rent_exemption(MAX_METADATA_LEN)?;
 
     let instructions = vec![update_metadata_accounts(
-        spl_token_metadata::id(),
+        metaplex_token_metadata::id(),
         metadata_address,
         update_authority,
         new_update_authority,
@@ -1040,7 +1040,7 @@ fn command_master_edition_create(
     let edition = Mint::calc_master_edition(&mint_data.token);
 
     let instructions = vec![create_master_edition(
-        spl_token_metadata::id(),
+        metaplex_token_metadata::id(),
         edition,
         mint_data.token,
         update_authority,
@@ -1453,7 +1453,7 @@ mod helper_tests {
     use super::FetchParse;
     use solana_sdk::pubkey::Pubkey;
     use spl_token::state::Mint;
-    use spl_token_metadata::state::Metadata;
+    use metaplex_token_metadata::state::Metadata;
     use std::str::FromStr;
 
     #[test]
