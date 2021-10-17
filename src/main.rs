@@ -635,7 +635,8 @@ fn get_app() -> App<'static, 'static> {
     app_matches
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let no_wait = false;
     let app_matches = get_app().get_matches();
 
