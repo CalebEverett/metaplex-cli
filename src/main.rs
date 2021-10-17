@@ -6,6 +6,16 @@ use spl_associated_token_account::{
     self, create_associated_token_account, get_associated_token_address,
 };
 
+use metaplex_token_metadata::{
+    self,
+    error::MetadataError,
+    instruction::{create_master_edition, create_metadata_accounts, update_metadata_accounts},
+    state::{
+        Creator, Data, Key, Metadata, EDITION, MAX_CREATOR_LIMIT, MAX_MASTER_EDITION_LEN,
+        MAX_METADATA_LEN, PREFIX,
+    },
+    utils::try_from_slice_checked,
+};
 use solana_account_decoder::{
     parse_token::{parse_token, TokenAccountType},
     UiAccountEncoding,
@@ -41,16 +51,6 @@ use solana_sdk::{
 use spl_token::{
     self,
     state::{Account, Mint},
-};
-use metaplex_token_metadata::{
-    self,
-    error::MetadataError,
-    instruction::{create_master_edition, create_metadata_accounts, update_metadata_accounts},
-    state::{
-        Creator, Data, Key, Metadata, EDITION, MAX_CREATOR_LIMIT, MAX_MASTER_EDITION_LEN,
-        MAX_METADATA_LEN, PREFIX,
-    },
-    utils::try_from_slice_checked,
 };
 use std::{fmt::Display, process::exit, str::FromStr, sync::Arc};
 
@@ -107,7 +107,7 @@ fn validate_creator_shares(creators: &Vec<Creator>) -> Result<(), clap::Error> {
     }
 }
 
-// Validates individuals creator <PUBKEY:SHARE> arguments to make sure the
+// Validates individual creator <PUBKEY:SHARE> arguments to make sure the
 // pubkey is valid and the individual share is less than 100. Clap doesn't have
 // the native ability to validate over multiple values, i.e, to validate that sum
 // of shares is equal to 100. That is done separately in the operative commands
@@ -620,7 +620,7 @@ fn get_app() -> App<'static, 'static> {
                 .mint_args(),
         )
         .subcommand(
-            SubCommand::with_name("supply")
+            SubCommand::with_name("mint-supply")
                 .about("Get token supply")
                 .arg(
                     Arg::with_name("address")
@@ -782,7 +782,7 @@ fn main() {
                 max_supply,
             )
         }
-        ("supply", Some(arg_matches)) => {
+        ("mint-supply", Some(arg_matches)) => {
             let address = pubkey_of_signer(arg_matches, "address", &mut wallet_manager)
                 .unwrap()
                 .unwrap();
@@ -1451,9 +1451,9 @@ mod helper_tests {
     use crate::MasterEditionCalc;
 
     use super::FetchParse;
+    use metaplex_token_metadata::state::Metadata;
     use solana_sdk::pubkey::Pubkey;
     use spl_token::state::Mint;
-    use metaplex_token_metadata::state::Metadata;
     use std::str::FromStr;
 
     #[test]

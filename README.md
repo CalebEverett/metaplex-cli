@@ -7,6 +7,8 @@ This a command line interface for creating and managing non-fungible tokens on t
 
 ## Implemented commands
 
+* `mint-create`: create a new token mint - same command as in spl-token, included here for convenience. 
+* `mint-supply`: display supply of tokens from mint - same command as in spl-token, included here for convenience. 
 * `mint-info`: display information for an existing mint account.
 * `metadata-info`: display information for an existing metadata account.
 * `metadata-create`: create a new metadata account for an existing mint, including creators and shares.
@@ -164,14 +166,16 @@ Creators: 2
 
 ## Todo
 1. Add individual commands for minting tokens and creating master editions
-2. Display edition info
-3. Bulkify
-4. Upload to storage
-5. Vault
-6. Auction
-6. Candy Store
-6. Fractionalization
-7. Custom Edition Metadata
+1. Display edition info
+1. Create and update from json files
+1. Integration tests
+1. Bulkify
+1. Upload to storage
+1. Vault
+1. Auction
+1. Candy Store
+1. Fractionalization
+1. Custom Edition Metadata
 
 ## Implementation Details
 
