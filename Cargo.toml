@@ -23,6 +23,8 @@ jsonwebkey = { version = "0.3.4", features = [ "pkcs-convert" ] }
 log = "0.4.14"
 metaplex = { git = "https://github.com/metaplex-foundation/metaplex", features = [ "no-entrypoint" ] }
 metaplex-token-metadata = { git = "https://github.com/metaplex-foundation/metaplex", features = [ "no-entrypoint" ] }
+num-bigint = { version = "0.4.2", features = [ "serde" ] }
+num-traits = "0.2.14"
 ring = {version = "0.16.20", features = [ "std" ] }
 reqwest = { version = "0.11", features = ["json"] }
 serde = "1.0.130"

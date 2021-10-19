@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use base64;
 use jsonwebkey::JsonWebKey;
 use log::debug;
+use num_bigint::{BigUint, ToBigInt};
 use reqwest;
 use ring::{
     digest::{Context, SHA256, SHA384},
@@ -18,6 +19,16 @@ pub struct Provider {
     pub units: String,
     base: Url,
     pub keypair: RsaKeyPair,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct OraclePrice {
+    arweave: OraclePricePair,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct OraclePricePair {
+    usd: f32,
 }
 
 pub async fn get_provider(keypair_path: &str) -> Result<Provider, Error> {
@@ -42,8 +53,8 @@ async fn get_keypair(keypair_path: &str) -> Result<RsaKeyPair, Error> {
 #[async_trait]
 pub trait Methods {
     fn wallet_address(&self) -> Result<String, Error>;
-    async fn wallet_balance(&self, wallet_address: Option<String>) -> Result<u64, Error>;
-    async fn price(&self, bytes: u32) -> Result<u64, Error>;
+    async fn wallet_balance(&self, wallet_address: Option<String>) -> Result<BigUint, Error>;
+    async fn price(&self, bytes: u32) -> Result<(BigUint, BigUint), Error>;
     async fn get_data(&self, id: &str) -> Result<(), Error>;
     fn verify_signature(&self, signature: &[u8], message: &[u8]) -> Result<(), Error>;
     async fn upload_file(&self, file_path: &str) -> Result<(), Error>;
@@ -102,22 +113,35 @@ impl Methods for Provider {
     }
 
     /// Returns the balance of the wallet.
-    async fn wallet_balance(&self, wallet_address: Option<String>) -> Result<u64, Error> {
+    async fn wallet_balance(&self, wallet_address: Option<String>) -> Result<BigUint, Error> {
         let wallet_address = wallet_address.unwrap_or_else(|| self.wallet_address().unwrap());
         let url = self
             .base
             .join(&format!("wallet/{}/balance", &wallet_address))?;
         debug!("price url: {}", url);
-        let resp = reqwest::get(url).await?.json::<u64>().await?;
-        Ok(resp)
+        let winstons = reqwest::get(url).await?.json::<u64>().await?;
+        Ok(BigUint::from(winstons))
     }
 
-    /// Returns the price in winstons of uploading data to the network.
-    async fn price(&self, bytes: u32) -> Result<u64, Error> {
+    /// Returns prices of uploading data to the network in winstons and usd per AR
+    /// as a BigUint with two decimals.
+    async fn price(&self, bytes: u32) -> Result<(BigUint, BigUint), Error> {
         let url = self.base.join("price/")?.join(&bytes.to_string())?;
         debug!("price url: {}", url);
-        let resp = reqwest::get(url).await?.json::<u64>().await?;
-        Ok(resp)
+        let winstons_per_bytes = reqwest::get(url).await?.json::<u64>().await?;
+        let winstons_per_bytes = BigUint::from(winstons_per_bytes);
+        let oracle_url =
+            "https://api.coingecko.com/api/v3/simple/price?ids=arweave&vs_currencies=usd";
+        let usd_per_ar = reqwest::get(oracle_url)
+            .await?
+            .json::<OraclePrice>()
+            .await?
+            .arweave
+            .usd;
+
+        let usd_per_ar: BigUint = BigUint::from((usd_per_ar * 100.0).floor() as u32);
+
+        Ok((winstons_per_bytes, usd_per_ar))
     }
     async fn get_data(&self, id: &str) -> Result<(), Error> {
         let url = self.base.join("tx/")?.join(id)?;
@@ -174,12 +198,12 @@ impl Methods for Provider {
     /// assert_eq!(file_path, &"tests/fixtures/0.json");
     /// # Ok(())
     /// # }
-    /// ```    
+    /// ```
     async fn upload_file(&self, file_path: &str) -> Result<(), Error> {
         let mut file = File::open(file_path).await?;
-        let mut file_string = String::new();
-        file.read_to_string(&mut file_string).await?;
-        let base64_string = base64::encode_config(file_string, base64::URL_SAFE_NO_PAD);
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).await?;
+        let base64_string = base64::encode_config(buffer, base64::URL_SAFE_NO_PAD);
         let decoded = base64::decode_config(base64_string, base64::URL_SAFE_NO_PAD)?;
         println!("{}", String::from_utf8(decoded).unwrap());
         // assert_eq!("yo man", kind.mime_type());

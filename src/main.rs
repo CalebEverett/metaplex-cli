@@ -2,10 +2,11 @@ use clap::{
     self, crate_description, crate_name, crate_version, value_t, value_t_or_exit, App, AppSettings,
     Arg, ArgGroup, ArgMatches, SubCommand, Values,
 };
+use num_bigint::BigUint;
+use num_traits::cast::ToPrimitive;
 use spl_associated_token_account::{
     self, create_associated_token_account, get_associated_token_address,
 };
-use std::future::Future;
 
 use metaplex_token_metadata::{
     self,
@@ -66,6 +67,10 @@ use arweave::{get_provider, Methods, Provider};
 
 type Error = Box<dyn std::error::Error>;
 type CommandResult = Result<Option<(u64, Vec<Vec<Instruction>>)>, Error>;
+
+// CONSTANTS
+
+const WINSTONS_PER_AR: u64 = 1000000000000;
 
 // INPUT VALIDATORS
 
@@ -653,41 +658,50 @@ fn get_app() -> App<'static, 'static> {
                         ),
                 )
                 .subcommand(
-                    SubCommand::with_name("price").arg(
-                        Arg::with_name("bytes")
-                            .value_name("BYTES")
-                            .takes_value(true)
-                            .validator(is_parsable::<u32>),
-                    ),
+                    SubCommand::with_name("price")
+                        .about("Returns the price of uploading data.")
+                        .arg(
+                            Arg::with_name("bytes")
+                                .value_name("BYTES")
+                                .takes_value(true)
+                                .validator(is_parsable::<u32>)
+                                .help("Specify the number of bytes to to be uploaded."),
+                        ),
                 )
                 .subcommand(
-                    SubCommand::with_name("data").arg(
-                        Arg::with_name("id")
-                            .value_name("ID")
-                            .takes_value(true)
-                            .help("Id of data to return from storage."),
-                    ),
+                    SubCommand::with_name("data")
+                        .about("Fetches file data from.")
+                        .arg(
+                            Arg::with_name("id")
+                                .value_name("ID")
+                                .takes_value(true)
+                                .help("Id of data to return from storage."),
+                        ),
                 )
                 .subcommand(
-                    SubCommand::with_name("wallet-balance").arg(
-                        Arg::with_name("wallet_address")
-                            .value_name("WALLET_ADDRESS")
-                            .takes_value(true)
-                            .help(
-                                "Specify wallet address for which to \
+                    SubCommand::with_name("wallet-balance")
+                        .about("Returns the balance of a wallet.")
+                        .arg(
+                            Arg::with_name("wallet_address")
+                                .value_name("WALLET_ADDRESS")
+                                .takes_value(true)
+                                .help(
+                                    "Specify wallet address for which to \
                             return balance. Defaults to address of keypair \
                             used by keypair-path argument.",
-                            ),
-                    ),
+                                ),
+                        ),
                 )
                 .subcommand(
-                    SubCommand::with_name("upload-file").arg(
-                        Arg::with_name("file-path")
-                            .value_name("FILE_PATH")
-                            .takes_value(true)
-                            .required(true)
-                            .help("Specify path of file to be uploaded."),
-                    ),
+                    SubCommand::with_name("upload-file")
+                        .about("Uploads a file.")
+                        .arg(
+                            Arg::with_name("file-path")
+                                .value_name("FILE_PATH")
+                                .takes_value(true)
+                                .required(true)
+                                .help("Specify path of file to be uploaded."),
+                        ),
                 ),
         );
     app_matches
@@ -1383,12 +1397,14 @@ fn command_mint(
 }
 
 async fn command_price(provider: &Provider, bytes: u32, config: &Config) -> CommandResult {
-    let price = provider.price(bytes).await?;
+    let (winstons_per_kb, usd_per_ar) = provider.price(bytes).await?;
+    let usd_per_kb = (&winstons_per_kb * &usd_per_ar).to_f32().unwrap() / 1e14_f32;
+
     println_display(
         config,
         format!(
-            "The price to upload {} bytes to {} is {} {}.",
-            bytes, provider.name, price, provider.units
+            "The price to upload {} bytes to {} is {} {} (${}).",
+            bytes, provider.name, winstons_per_kb, provider.units, usd_per_kb
         ),
     );
     Ok(None)
@@ -1409,15 +1425,22 @@ async fn command_wallet_balance(
         provider.price(u32::pow(1024, 2))
     );
     let balance = result.0?;
-    let price = result.1?;
+    let (winstons_per_kb, usd_per_ar) = result.1?;
+
+    let balance_usd = &balance / &WINSTONS_PER_AR * &usd_per_ar;
+
+    let usd_per_kb = (&winstons_per_kb * &usd_per_ar).to_f32().unwrap() / 1e14_f32;
+
     println_display(
         config,
         format!(
-            "Wallet balance is {} {units}. At the current price of {price} {units} per MB, you can upload {max} MB of data.",
+            "Wallet balance is {} {units} (${balance_usd}). At the current price of {price} {units} (${usd_price:.4}) per MB, you can upload {max} MB of data.",
             &balance,
             units = provider.units,
-            max = &balance / &price,
-            price = &price
+            max = &balance / &winstons_per_kb,
+            price = &winstons_per_kb,
+            balance_usd = balance_usd.to_f32().unwrap() / 100_f32,
+            usd_price = usd_per_kb
         ),
     );
     Ok(None)
