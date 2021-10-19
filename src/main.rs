@@ -681,11 +681,12 @@ fn get_app() -> App<'static, 'static> {
                     ),
                 )
                 .subcommand(
-                    SubCommand::with_name("keypair").arg(
-                        Arg::with_name("keypair")
-                            .value_name("keypair")
+                    SubCommand::with_name("upload-file").arg(
+                        Arg::with_name("file-path")
+                            .value_name("FILE_PATH")
                             .takes_value(true)
-                            .help("Load keypair."),
+                            .required(true)
+                            .help("Specify path of file to be uploaded."),
                     ),
                 ),
         );
@@ -857,7 +858,7 @@ async fn main() {
         ("arweave", Some(arg_matches)) => {
             let keypair_path = arg_matches.value_of("keypair_path").unwrap();
 
-            let provider = get_provider(keypair_path).unwrap();
+            let provider = get_provider(keypair_path).await.unwrap();
             let (sub_sub_command, sub_arg_matches) = arg_matches.subcommand();
 
             match (sub_sub_command, sub_arg_matches) {
@@ -874,6 +875,10 @@ async fn main() {
                         .value_of("wallet_address")
                         .map(|v| v.to_string());
                     command_wallet_balance(&provider, &config, wallet_address).await
+                }
+                ("upload-file", Some(sub_sub_arg_matches)) => {
+                    let file_path = sub_sub_arg_matches.value_of("file-path").unwrap();
+                    command_file_upload(&provider, &config, file_path).await
                 }
                 _ => unreachable!(),
             }
@@ -1415,6 +1420,15 @@ async fn command_wallet_balance(
             price = &price
         ),
     );
+    Ok(None)
+}
+
+async fn command_file_upload(
+    provider: &Provider,
+    config: &Config,
+    file_path: &str,
+) -> CommandResult {
+    provider.upload_file(file_path).await?;
     Ok(None)
 }
 

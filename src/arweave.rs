@@ -1,15 +1,14 @@
 use async_trait::async_trait;
 use base64;
-use jsonwebkey::{JsonWebKey, Key};
+use jsonwebkey::JsonWebKey;
 use log::debug;
 use reqwest;
 use ring::{
     digest::{Context, SHA256, SHA384},
-    rand,
     signature::{self, KeyPair, RsaKeyPair},
 };
 use serde::{Deserialize, Serialize};
-use std::{fs::File, io::Read};
+use tokio::{fs::File, io::AsyncReadExt};
 use url::Url;
 
 type Error = Box<dyn std::error::Error>;
@@ -21,20 +20,20 @@ pub struct Provider {
     pub keypair: RsaKeyPair,
 }
 
-pub fn get_provider(keypair_path: &str) -> Result<Provider, Error> {
+pub async fn get_provider(keypair_path: &str) -> Result<Provider, Error> {
     Ok(Provider {
         name: String::from("arweave"),
         units: String::from("winstons"),
         base: Url::parse("https://arweave.net/")?,
-        keypair: get_keypair(keypair_path)?,
+        keypair: get_keypair(keypair_path).await?,
     })
 }
 
-fn get_keypair(keypair_path: &str) -> Result<RsaKeyPair, Error> {
+async fn get_keypair(keypair_path: &str) -> Result<RsaKeyPair, Error> {
     debug!("{:?}", keypair_path);
-    let mut file = File::open(keypair_path)?;
+    let mut file = File::open(keypair_path).await?;
     let mut jwk_str = String::new();
-    file.read_to_string(&mut jwk_str)?;
+    file.read_to_string(&mut jwk_str).await?;
     let jwk_parsed: JsonWebKey = jwk_str.parse().unwrap();
     let keypair = signature::RsaKeyPair::from_pkcs8(&jwk_parsed.key.as_ref().to_der())?;
     Ok(keypair)
@@ -47,7 +46,7 @@ pub trait Methods {
     async fn price(&self, bytes: u32) -> Result<u64, Error>;
     async fn get_data(&self, id: &str) -> Result<(), Error>;
     fn verify_signature(&self, signature: &[u8], message: &[u8]) -> Result<(), Error>;
-    async fn upload_file(&self) -> Result<(), Error>;
+    async fn upload_file(&self, file_path: &str) -> Result<(), Error>;
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -74,6 +73,21 @@ struct Tag {
 
 #[async_trait]
 impl Methods for Provider {
+    /// Calculates the wallet address of the provided keypair according to [addressing](https://docs.arweave.org/developers/server/http-api#addressing)
+    /// in documentation.
+    ///```
+    /// # use ring::{signature, rand};
+    /// # use metaplex_cli_lib::arweave::*;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let provider = get_provider("tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json").await?;
+    /// let calc = provider.wallet_address()?;
+    /// let actual = String::from("7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg");
+    /// assert_eq!(&calc, &actual);
+    /// # Ok(())
+    /// # }
+    /// ```
     fn wallet_address(&self) -> Result<String, Error> {
         let mut context = Context::new(&SHA256);
         let modulus = self
@@ -83,12 +97,11 @@ impl Methods for Provider {
             .big_endian_without_leading_zero();
         context.update(modulus);
 
-        let wallet_address = base64::encode(context.finish())
-            .replace("/", "_")
-            .replace("=", "");
+        let wallet_address = base64::encode_config(context.finish(), base64::URL_SAFE_NO_PAD);
         Ok(wallet_address)
     }
 
+    /// Returns the balance of the wallet.
     async fn wallet_balance(&self, wallet_address: Option<String>) -> Result<u64, Error> {
         let wallet_address = wallet_address.unwrap_or_else(|| self.wallet_address().unwrap());
         let url = self
@@ -99,6 +112,7 @@ impl Methods for Provider {
         Ok(resp)
     }
 
+    /// Returns the price in winstons of uploading data to the network.
     async fn price(&self, bytes: u32) -> Result<u64, Error> {
         let url = self.base.join("price/")?.join(&bytes.to_string())?;
         debug!("price url: {}", url);
@@ -118,18 +132,12 @@ impl Methods for Provider {
 
     /// Verifies that a message was signed by the public key of the Provider.key keypair.
     ///```
-    /// # use jsonwebkey::{JsonWebKey, Key};
-    /// # use log::debug;
-    /// # use reqwest;
-    /// # use ring::{
-    /// #     digest::{Context, SHA256, SHA384},
-    /// #     rand,
-    /// #     signature::{self, KeyPair, RsaKeyPair},
-    /// # };
+    /// # use ring::{signature, rand};
     /// # use metaplex_cli_lib::arweave::*;
     /// #
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let provider = get_provider("tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json")?;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let provider = get_provider("tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json").await?;
     /// let message = String::from("hello, world");
     /// let rng = rand::SystemRandom::new();
     /// let mut signature = vec![0; provider.keypair.public_modulus_len()];
@@ -152,7 +160,29 @@ impl Methods for Provider {
         public_key.verify(message, signature)?;
         Ok(())
     }
-    async fn upload_file(&self) -> Result<(), Error> {
+
+    /// Uploads a file to arweave.
+    ///```
+    /// use infer;
+    /// # use metaplex_cli_lib::arweave::*;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let provider = get_provider("tests/fixtures/0.json").await?;
+    /// let file_path = &"tests/fixtures/0.json";
+    /// provider.upload_file(&file_path);
+    /// assert_eq!(file_path, &"tests/fixtures/0.json");
+    /// # Ok(())
+    /// # }
+    /// ```    
+    async fn upload_file(&self, file_path: &str) -> Result<(), Error> {
+        let mut file = File::open(file_path).await?;
+        let mut file_string = String::new();
+        file.read_to_string(&mut file_string).await?;
+        let base64_string = base64::encode_config(file_string, base64::URL_SAFE_NO_PAD);
+        let decoded = base64::decode_config(base64_string, base64::URL_SAFE_NO_PAD)?;
+        println!("{}", String::from_utf8(decoded).unwrap());
+        // assert_eq!("yo man", kind.mime_type());
         Ok(())
     }
 }
