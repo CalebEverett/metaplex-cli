@@ -6,6 +6,10 @@ edition = "2018"
 license = "Apache-2.0"
 repository = "https://github.com/CalebEverett/metaplex-cli"
 
+[lib]
+name = "metaplex_cli_lib"
+path = "src/lib.rs"
+
 [dependencies]
 async-trait = "0.1.51"
 base64 = "0.13.0"
@@ -14,9 +18,11 @@ clap = "2.33.3"
 console = "0.15.0"
 env_logger = "0.9.0"
 indicatif = "0.16.2"
+jsonwebkey = { version = "0.3.4", features = [ "pkcs-convert" ] }
 log = "0.4.14"
 metaplex = { git = "https://github.com/metaplex-foundation/metaplex", features = [ "no-entrypoint" ] }
 metaplex-token-metadata = { git = "https://github.com/metaplex-foundation/metaplex", features = [ "no-entrypoint" ] }
+ring = {version = "0.16.20", features = [ "std" ] }
 reqwest = { version = "0.11", features = ["json"] }
 serde = "1.0.130"
 serde_derive = "1.0.130"

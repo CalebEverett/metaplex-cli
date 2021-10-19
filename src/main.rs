@@ -5,6 +5,7 @@ use clap::{
 use spl_associated_token_account::{
     self, create_associated_token_account, get_associated_token_address,
 };
+use std::future::Future;
 
 use metaplex_token_metadata::{
     self,
@@ -60,10 +61,10 @@ use crate::config::Config;
 pub mod output;
 use output::{println_display, CliMetadata, CliMint, CliTokenAmount, UiMetadata};
 
-pub mod storage;
-use storage::*;
+pub mod arweave;
+use arweave::{get_provider, Methods, Provider};
 
-pub(crate) type Error = Box<dyn std::error::Error>;
+type Error = Box<dyn std::error::Error>;
 type CommandResult = Result<Option<(u64, Vec<Vec<Instruction>>)>, Error>;
 
 // INPUT VALIDATORS
@@ -636,15 +637,20 @@ fn get_app() -> App<'static, 'static> {
                 ),
         )
         .subcommand(
-            SubCommand::with_name("storage")
+            SubCommand::with_name("arweave")
+                .about("Commands for interacting with Arweave.")
                 .arg(
-                    Arg::with_name("provider")
-                        .long("provider")
-                        .value_name("PROVIDER")
-                        .takes_value(true)
-                        .possible_values(&["arweave", "ipfs"])
-                        .default_value("arweave")
-                        .help("Specify storage provider."),
+                    Arg::with_name("keypair_path")
+                        .long("keypair-path")
+                        .value_name("ARWEAVE_KEYPAIR_PATH")
+                        .env("ARWEAVE_KEYPAIR_PATH")
+                        .required(true)
+                        .help(
+                            "Specify path to keypair file for Arweave \
+                                wallet to pay for and sign upload transaction. \
+                                Defaults to value specified in \
+                                ARWEAVE_KEYPAIR_PATH environment variable.",
+                        ),
                 )
                 .subcommand(
                     SubCommand::with_name("price").arg(
@@ -652,6 +658,34 @@ fn get_app() -> App<'static, 'static> {
                             .value_name("BYTES")
                             .takes_value(true)
                             .validator(is_parsable::<u32>),
+                    ),
+                )
+                .subcommand(
+                    SubCommand::with_name("data").arg(
+                        Arg::with_name("id")
+                            .value_name("ID")
+                            .takes_value(true)
+                            .help("Id of data to return from storage."),
+                    ),
+                )
+                .subcommand(
+                    SubCommand::with_name("wallet-balance").arg(
+                        Arg::with_name("wallet_address")
+                            .value_name("WALLET_ADDRESS")
+                            .takes_value(true)
+                            .help(
+                                "Specify wallet address for which to \
+                            return balance. Defaults to address of keypair \
+                            used by keypair-path argument.",
+                            ),
+                    ),
+                )
+                .subcommand(
+                    SubCommand::with_name("keypair").arg(
+                        Arg::with_name("keypair")
+                            .value_name("keypair")
+                            .takes_value(true)
+                            .help("Load keypair."),
                     ),
                 ),
         );
@@ -820,13 +854,26 @@ async fn main() {
             command_create_token(&config, &data)
         }
 
-        ("storage", Some(arg_matches)) => {
+        ("arweave", Some(arg_matches)) => {
+            let keypair_path = arg_matches.value_of("keypair_path").unwrap();
+
+            let provider = get_provider(keypair_path).unwrap();
             let (sub_sub_command, sub_arg_matches) = arg_matches.subcommand();
-            let provider_str = arg_matches.value_of("provider").unwrap();
+
             match (sub_sub_command, sub_arg_matches) {
                 ("price", Some(sub_sub_arg_matches)) => {
                     let bytes = value_t!(sub_sub_arg_matches, "bytes", u32).unwrap();
-                    command_get_price(provider_str, bytes, &config).await
+                    command_price(&provider, bytes, &config).await
+                }
+                ("data", Some(sub_sub_arg_matches)) => {
+                    let id = sub_sub_arg_matches.value_of("id").unwrap();
+                    command_data(&provider, id, &config).await
+                }
+                ("wallet-balance", Some(sub_sub_arg_matches)) => {
+                    let wallet_address = sub_sub_arg_matches
+                        .value_of("wallet_address")
+                        .map(|v| v.to_string());
+                    command_wallet_balance(&provider, &config, wallet_address).await
                 }
                 _ => unreachable!(),
             }
@@ -1330,14 +1377,42 @@ fn command_mint(
     Ok(Some((0, vec![instructions])))
 }
 
-async fn command_get_price(provider_str: &str, bytes: u32, config: &Config) -> CommandResult {
-    let provider = storage::get_provider(provider_str)?;
-    let price = provider.get_price(1024).await?;
+async fn command_price(provider: &Provider, bytes: u32, config: &Config) -> CommandResult {
+    let price = provider.price(bytes).await?;
     println_display(
         config,
         format!(
             "The price to upload {} bytes to {} is {} {}.",
             bytes, provider.name, price, provider.units
+        ),
+    );
+    Ok(None)
+}
+
+async fn command_data(provider: &Provider, id: &str, config: &Config) -> CommandResult {
+    let data = provider.get_data(id).await?;
+    Ok(None)
+}
+
+async fn command_wallet_balance(
+    provider: &Provider,
+    config: &Config,
+    wallet_address: Option<String>,
+) -> CommandResult {
+    let result = tokio::join!(
+        provider.wallet_balance(wallet_address),
+        provider.price(u32::pow(1024, 2))
+    );
+    let balance = result.0?;
+    let price = result.1?;
+    println_display(
+        config,
+        format!(
+            "Wallet balance is {} {units}. At the current price of {price} {units} per MB, you can upload {max} MB of data.",
+            &balance,
+            units = provider.units,
+            max = &balance / &price,
+            price = &price
         ),
     );
     Ok(None)
