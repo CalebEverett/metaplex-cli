@@ -2,7 +2,6 @@ use clap::{
     self, crate_description, crate_name, crate_version, value_t, value_t_or_exit, App, AppSettings,
     Arg, ArgGroup, ArgMatches, SubCommand, Values,
 };
-use num_bigint::BigUint;
 use num_traits::cast::ToPrimitive;
 use spl_associated_token_account::{
     self, create_associated_token_account, get_associated_token_address,
@@ -669,7 +668,7 @@ fn get_app() -> App<'static, 'static> {
                         ),
                 )
                 .subcommand(
-                    SubCommand::with_name("data")
+                    SubCommand::with_name("get-transaction")
                         .about("Fetches file data from.")
                         .arg(
                             Arg::with_name("id")
@@ -696,8 +695,8 @@ fn get_app() -> App<'static, 'static> {
                     SubCommand::with_name("upload-file")
                         .about("Uploads a file.")
                         .arg(
-                            Arg::with_name("file-path")
-                                .value_name("FILE_PATH")
+                            Arg::with_name("filepath")
+                                .value_name("FILEPATH")
                                 .takes_value(true)
                                 .required(true)
                                 .help("Specify path of file to be uploaded."),
@@ -877,12 +876,12 @@ async fn main() {
 
             match (sub_sub_command, sub_arg_matches) {
                 ("price", Some(sub_sub_arg_matches)) => {
-                    let bytes = value_t!(sub_sub_arg_matches, "bytes", u32).unwrap();
-                    command_price(&provider, bytes, &config).await
+                    let bytes = value_t!(sub_sub_arg_matches, "bytes", usize).unwrap();
+                    command_price(&provider, &bytes, &config).await
                 }
-                ("data", Some(sub_sub_arg_matches)) => {
+                ("get-transaction", Some(sub_sub_arg_matches)) => {
                     let id = sub_sub_arg_matches.value_of("id").unwrap();
-                    command_data(&provider, id, &config).await
+                    command_get_transaction(&provider, id).await
                 }
                 ("wallet-balance", Some(sub_sub_arg_matches)) => {
                     let wallet_address = sub_sub_arg_matches
@@ -891,8 +890,8 @@ async fn main() {
                     command_wallet_balance(&provider, &config, wallet_address).await
                 }
                 ("upload-file", Some(sub_sub_arg_matches)) => {
-                    let file_path = sub_sub_arg_matches.value_of("file-path").unwrap();
-                    command_file_upload(&provider, &config, file_path).await
+                    let filepath = sub_sub_arg_matches.value_of("filepath").unwrap();
+                    command_file_upload(&provider, filepath).await
                 }
                 _ => unreachable!(),
             }
@@ -1396,7 +1395,7 @@ fn command_mint(
     Ok(Some((0, vec![instructions])))
 }
 
-async fn command_price(provider: &Provider, bytes: u32, config: &Config) -> CommandResult {
+async fn command_price(provider: &Provider, bytes: &usize, config: &Config) -> CommandResult {
     let (winstons_per_kb, usd_per_ar) = provider.price(bytes).await?;
     let usd_per_kb = (&winstons_per_kb * &usd_per_ar).to_f32().unwrap() / 1e14_f32;
 
@@ -1410,8 +1409,8 @@ async fn command_price(provider: &Provider, bytes: u32, config: &Config) -> Comm
     Ok(None)
 }
 
-async fn command_data(provider: &Provider, id: &str, config: &Config) -> CommandResult {
-    let data = provider.get_data(id).await?;
+async fn command_get_transaction(provider: &Provider, id: &str) -> CommandResult {
+    provider.get_transaction(id).await?;
     Ok(None)
 }
 
@@ -1420,10 +1419,8 @@ async fn command_wallet_balance(
     config: &Config,
     wallet_address: Option<String>,
 ) -> CommandResult {
-    let result = tokio::join!(
-        provider.wallet_balance(wallet_address),
-        provider.price(u32::pow(1024, 2))
-    );
+    let mb = u32::pow(1024, 2) as usize;
+    let result = tokio::join!(provider.wallet_balance(wallet_address), provider.price(&mb));
     let balance = result.0?;
     let (winstons_per_kb, usd_per_ar) = result.1?;
 
@@ -1446,12 +1443,9 @@ async fn command_wallet_balance(
     Ok(None)
 }
 
-async fn command_file_upload(
-    provider: &Provider,
-    config: &Config,
-    file_path: &str,
-) -> CommandResult {
-    provider.upload_file(file_path).await?;
+async fn command_file_upload(provider: &Provider, filepath: &str) -> CommandResult {
+    let transaction = provider.transaction_from_filepath(filepath).await?;
+    provider.post_transaction(&transaction).await?;
     Ok(None)
 }
 

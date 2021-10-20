@@ -21,6 +21,7 @@ This is a command line interface for creating and managing non-fungible tokens o
     * creators
     * primary_sale_happened
 * `nft-create`: create a de novo nft including mint, token account, metadata account and master edition.
+* `arweave`: upload files to the Arweave permaweb.
 
 ## Getting Started
 
@@ -165,12 +166,13 @@ Creators: 2
 ```
 
 ## Todo
+- [x] Upload to storage
+- [ ] Proper tests for arweave module
 - [ ] Add individual commands for minting tokens and creating master editions
 - [ ] Display edition info
 - [ ] Create and update from json files
 - [ ] Integration tests
 - [ ] Bulkify
-- [ ] Upload to storage
 - [ ] Vault
 - [ ] Auction
 - [ ] Candy Store
