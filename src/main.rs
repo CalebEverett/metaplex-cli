@@ -2,6 +2,7 @@ use clap::{
     self, crate_description, crate_name, crate_version, value_t, value_t_or_exit, App, AppSettings,
     Arg, ArgGroup, ArgMatches, SubCommand, Values,
 };
+use num_traits::cast::ToPrimitive;
 use spl_associated_token_account::{
     self, create_associated_token_account, get_associated_token_address,
 };
@@ -60,8 +61,15 @@ use crate::config::Config;
 pub mod output;
 use output::{println_display, CliMetadata, CliMint, CliTokenAmount, UiMetadata};
 
-pub(crate) type Error = Box<dyn std::error::Error>;
+pub mod arweave;
+use arweave::{get_provider, Methods, Provider};
+
+type Error = Box<dyn std::error::Error>;
 type CommandResult = Result<Option<(u64, Vec<Vec<Instruction>>)>, Error>;
+
+// CONSTANTS
+
+const WINSTONS_PER_AR: u64 = 1000000000000;
 
 // INPUT VALIDATORS
 
@@ -609,7 +617,7 @@ fn get_app() -> App<'static, 'static> {
                         .long("max-supply")
                         .value_name("MAX_SUPPLY")
                         .takes_value(true)
-                        .validator(|s| is_parsable::<u64>(s))
+                        .validator(is_parsable::<u64>)
                         .default_value("1")
                         .help("Specify maximum allowable supply for master edition."),
                 ),
@@ -631,11 +639,75 @@ fn get_app() -> App<'static, 'static> {
                         .required(true)
                         .help("The token address"),
                 ),
+        )
+        .subcommand(
+            SubCommand::with_name("arweave")
+                .about("Commands for interacting with Arweave.")
+                .arg(
+                    Arg::with_name("keypair_path")
+                        .long("keypair-path")
+                        .value_name("ARWEAVE_KEYPAIR_PATH")
+                        .env("ARWEAVE_KEYPAIR_PATH")
+                        .required(true)
+                        .help(
+                            "Specify path to keypair file for Arweave \
+                                wallet to pay for and sign upload transaction. \
+                                Defaults to value specified in \
+                                ARWEAVE_KEYPAIR_PATH environment variable.",
+                        ),
+                )
+                .subcommand(
+                    SubCommand::with_name("price")
+                        .about("Returns the price of uploading data.")
+                        .arg(
+                            Arg::with_name("bytes")
+                                .value_name("BYTES")
+                                .takes_value(true)
+                                .validator(is_parsable::<u32>)
+                                .help("Specify the number of bytes to to be uploaded."),
+                        ),
+                )
+                .subcommand(
+                    SubCommand::with_name("get-transaction")
+                        .about("Fetches file data from.")
+                        .arg(
+                            Arg::with_name("id")
+                                .value_name("ID")
+                                .takes_value(true)
+                                .help("Id of data to return from storage."),
+                        ),
+                )
+                .subcommand(
+                    SubCommand::with_name("wallet-balance")
+                        .about("Returns the balance of a wallet.")
+                        .arg(
+                            Arg::with_name("wallet_address")
+                                .value_name("WALLET_ADDRESS")
+                                .takes_value(true)
+                                .help(
+                                    "Specify wallet address for which to \
+                            return balance. Defaults to address of keypair \
+                            used by keypair-path argument.",
+                                ),
+                        ),
+                )
+                .subcommand(
+                    SubCommand::with_name("upload-file")
+                        .about("Uploads a file.")
+                        .arg(
+                            Arg::with_name("filepath")
+                                .value_name("FILEPATH")
+                                .takes_value(true)
+                                .required(true)
+                                .help("Specify path of file to be uploaded."),
+                        ),
+                ),
         );
     app_matches
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let no_wait = false;
     let app_matches = get_app().get_matches();
 
@@ -795,6 +867,36 @@ fn main() {
 
             command_create_token(&config, &data)
         }
+
+        ("arweave", Some(arg_matches)) => {
+            let keypair_path = arg_matches.value_of("keypair_path").unwrap();
+
+            let provider = get_provider(keypair_path).await.unwrap();
+            let (sub_sub_command, sub_arg_matches) = arg_matches.subcommand();
+
+            match (sub_sub_command, sub_arg_matches) {
+                ("price", Some(sub_sub_arg_matches)) => {
+                    let bytes = value_t!(sub_sub_arg_matches, "bytes", usize).unwrap();
+                    command_price(&provider, &bytes, &config).await
+                }
+                ("get-transaction", Some(sub_sub_arg_matches)) => {
+                    let id = sub_sub_arg_matches.value_of("id").unwrap();
+                    command_get_transaction(&provider, id).await
+                }
+                ("wallet-balance", Some(sub_sub_arg_matches)) => {
+                    let wallet_address = sub_sub_arg_matches
+                        .value_of("wallet_address")
+                        .map(|v| v.to_string());
+                    command_wallet_balance(&provider, &config, wallet_address).await
+                }
+                ("upload-file", Some(sub_sub_arg_matches)) => {
+                    let filepath = sub_sub_arg_matches.value_of("filepath").unwrap();
+                    command_file_upload(&provider, filepath).await
+                }
+                _ => unreachable!(),
+            }
+        }
+
         _ => unreachable!(),
     }
     // Note that transaction_info is expected to contain batches of instructions so that related
@@ -1291,6 +1393,60 @@ fn command_mint(
         )?]
     };
     Ok(Some((0, vec![instructions])))
+}
+
+async fn command_price(provider: &Provider, bytes: &usize, config: &Config) -> CommandResult {
+    let (winstons_per_kb, usd_per_ar) = provider.price(bytes).await?;
+    let usd_per_kb = (&winstons_per_kb * &usd_per_ar).to_f32().unwrap() / 1e14_f32;
+
+    println_display(
+        config,
+        format!(
+            "The price to upload {} bytes to {} is {} {} (${}).",
+            bytes, provider.name, winstons_per_kb, provider.units, usd_per_kb
+        ),
+    );
+    Ok(None)
+}
+
+async fn command_get_transaction(provider: &Provider, id: &str) -> CommandResult {
+    provider.get_transaction(id).await?;
+    Ok(None)
+}
+
+async fn command_wallet_balance(
+    provider: &Provider,
+    config: &Config,
+    wallet_address: Option<String>,
+) -> CommandResult {
+    let mb = u32::pow(1024, 2) as usize;
+    let result = tokio::join!(provider.wallet_balance(wallet_address), provider.price(&mb));
+    let balance = result.0?;
+    let (winstons_per_kb, usd_per_ar) = result.1?;
+
+    let balance_usd = &balance / &WINSTONS_PER_AR * &usd_per_ar;
+
+    let usd_per_kb = (&winstons_per_kb * &usd_per_ar).to_f32().unwrap() / 1e14_f32;
+
+    println_display(
+        config,
+        format!(
+            "Wallet balance is {} {units} (${balance_usd}). At the current price of {price} {units} (${usd_price:.4}) per MB, you can upload {max} MB of data.",
+            &balance,
+            units = provider.units,
+            max = &balance / &winstons_per_kb,
+            price = &winstons_per_kb,
+            balance_usd = balance_usd.to_f32().unwrap() / 100_f32,
+            usd_price = usd_per_kb
+        ),
+    );
+    Ok(None)
+}
+
+async fn command_file_upload(provider: &Provider, filepath: &str) -> CommandResult {
+    let transaction = provider.transaction_from_filepath(filepath).await?;
+    provider.post_transaction(&transaction).await?;
+    Ok(None)
 }
 
 #[cfg(test)]
