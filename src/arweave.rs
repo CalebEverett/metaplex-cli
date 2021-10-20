@@ -61,10 +61,15 @@ async fn hash_sha256(message: &[u8]) -> Result<Vec<u8>, Error> {
     Ok(context.finish().as_ref().to_vec())
 }
 
+async fn hash_sha384(message: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut context = Context::new(&SHA384);
+    context.update(message);
+    Ok(context.finish().as_ref().to_vec())
+}
+
 #[async_trait]
 pub trait EncDec {
     fn decode_base64_bytes(&self) -> Result<Vec<u8>, Error>;
-    async fn hash_sha384(&self) -> Result<String, Error>;
 }
 pub trait Base64Encode {
     fn to_base64_string(&self) -> Result<String, Error>;
@@ -74,12 +79,6 @@ pub trait Base64Encode {
 impl EncDec for String {
     fn decode_base64_bytes(&self) -> Result<Vec<u8>, Error> {
         base64::decode_config(self, base64::URL_SAFE_NO_PAD).map_err(|e| e.into())
-    }
-    async fn hash_sha384(&self) -> Result<String, Error> {
-        let mut context = Context::new(&SHA384);
-        context.update(self.as_bytes());
-        let hash = base64::encode_config(context.finish(), base64::URL_SAFE_NO_PAD);
-        Ok(hash)
     }
 }
 
@@ -313,13 +312,16 @@ impl Methods for Provider {
             &last_tx,
             &serialized_tags,
         ];
-        let hashed_base64_fields = try_join_all(base64_fields.map(|s| s.hash_sha384()))
-            .await?
-            .join("");
-        let data_root = hashed_base64_fields.hash_sha384().await?;
+        let hashed_base64_fields =
+            try_join_all(base64_fields.map(|s| hash_sha384(s.as_bytes()))).await?;
+
+        let data_root = &hashed_base64_fields
+            .into_iter()
+            .flatten()
+            .collect::<Vec<u8>>()[..];
 
         // Sign and encode data_root as id.
-        let signature = self.sign(data_root.as_bytes()).await?;
+        let signature = self.sign(&data_root).await?;
 
         let id = hash_sha256(&signature.as_ref()).await?.to_base64_string()?;
 
@@ -332,7 +334,7 @@ impl Methods for Provider {
             tags: Some(tags),
             target: Some(target),
             quantity: Some(quantity),
-            data_root,
+            data_root: data_root.to_base64_string()?,
             data_size,
             data,
             reward,
