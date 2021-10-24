@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use futures::future::try_join_all;
+
 use infer;
 use jsonwebkey::JsonWebKey;
 use log::debug;
@@ -131,7 +131,7 @@ pub struct Transaction {
     format: u8,
     id: String,
     last_tx: String,
-    owner: String,
+    // owner: String,
     tags: Option<Vec<Tag>>,
     target: Option<String>,
     quantity: Option<String>,
@@ -293,8 +293,15 @@ impl Methods for Provider {
             .text()
             .await?;
 
+        // let last_tx = "".to_string();
+
         // Get owner, same as wallet address.
-        let owner = self.wallet_address().await?;
+        // let owner = self
+        //     .keypair
+        //     .public_key()
+        //     .modulus()
+        //     .big_endian_without_leading_zero();
+
         let format = "2".to_string();
 
         // Include empty strings for quantity and target.
@@ -304,7 +311,7 @@ impl Methods for Provider {
         // Calculate merkle root as data_root.
         let base64_fields = [
             &format,
-            &owner,
+            // &owner,
             &target,
             &data_size,
             &quantity,
@@ -330,7 +337,7 @@ impl Methods for Provider {
             format: 2,
             id,
             last_tx,
-            owner,
+            // owner,
             tags: Some(tags),
             target: Some(target),
             quantity: Some(quantity),
@@ -354,7 +361,9 @@ impl Methods for Provider {
             .header(&CONTENT_TYPE, "application/json")
             .send()
             .await?;
+        debug!("trnsaction {:?}", &resp.url());
         assert_eq!(resp.status().as_u16(), 200);
+
         println!(
             "Posted transaction: https://arweave.net/{}",
             &transaction.id

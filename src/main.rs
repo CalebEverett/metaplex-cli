@@ -67,6 +67,8 @@ use arweave::{get_provider, Methods, Provider};
 type Error = Box<dyn std::error::Error>;
 type CommandResult = Result<Option<(u64, Vec<Vec<Instruction>>)>, Error>;
 
+pub mod arweave2;
+
 // CONSTANTS
 
 const WINSTONS_PER_AR: u64 = 1000000000000;

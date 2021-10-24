@@ -11,6 +11,7 @@ name = "metaplex_cli_lib"
 path = "src/lib.rs"
 
 [dependencies]
+arrayref = "0.3.6"
 async-trait = "0.1.51"
 base64 = "0.13.0"
 borsh = "0.9.1"
@@ -42,6 +43,7 @@ solana-sdk = "1.8.0"
 spl-token = { version = "3.2.0", features = [ "no-entrypoint" ] }
 spl-associated-token-account = "1.0.3"
 spl-memo = { version = "3.0.1", features = ["no-entrypoint"] }
+thiserror = "1.0.30"
 tokio = { version = "1", features = ["full"] }
 url = "2.2.2"
 
