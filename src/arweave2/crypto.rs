@@ -14,13 +14,15 @@ pub struct Provider {
     pub keypair: RsaKeyPair,
 }
 
+use crate::arweave2::merkle::HASH_SIZE;
+
 #[async_trait]
 pub trait Methods {
     async fn new(keypair_path: &str) -> Result<Provider, Error>;
     fn sign(&self, message: &[u8]) -> Result<Vec<u8>, Error>;
     fn verify(&self, signature: &[u8], message: &[u8]) -> Result<(), Error>;
-    fn hash(&self, message: &[u8], algorithm: &str) -> Result<Vec<u8>, Error>;
-    fn hash_all(&self, messages: Vec<&Vec<u8>>, algorithm: &str) -> Result<Vec<u8>, Error>;
+    fn hash(&self, message: &[u8], algorithm: &str) -> Result<[u8; HASH_SIZE], Error>;
+    fn hash_all(&self, messages: Vec<&[u8]>, algorithm: &str) -> Result<[u8; HASH_SIZE], Error>;
 }
 
 #[async_trait]
@@ -52,7 +54,7 @@ impl Methods for Provider {
         Ok(())
     }
 
-    fn hash(&self, message: &[u8], algorithm: &str) -> Result<Vec<u8>, Error> {
+    fn hash(&self, message: &[u8], algorithm: &str) -> Result<[u8; HASH_SIZE], Error> {
         let algorithm = match algorithm {
             "SHA256" => &SHA256,
             "SHA384" => &SHA384,
@@ -60,9 +62,11 @@ impl Methods for Provider {
         };
         let mut context = Context::new(algorithm);
         context.update(message);
-        Ok(context.finish().as_ref().to_vec())
+        let mut result: [u8; HASH_SIZE] = Default::default();
+        result.copy_from_slice(context.finish().as_ref());
+        Ok(result)
     }
-    fn hash_all(&self, messages: Vec<&Vec<u8>>, algorithm: &str) -> Result<Vec<u8>, Error> {
+    fn hash_all(&self, messages: Vec<&[u8]>, algorithm: &str) -> Result<[u8; HASH_SIZE], Error> {
         let id: Vec<u8> = messages
             .into_iter()
             .map(|m| self.hash(m, algorithm).unwrap())

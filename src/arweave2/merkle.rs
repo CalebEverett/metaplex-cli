@@ -2,16 +2,13 @@ use crate::arweave2::{
     crypto::{Methods, Provider},
     error::ArweaveError,
 };
-use arrayref::{array_ref, array_refs};
 use borsh::BorshDeserialize;
-use futures::future::try_join_all;
-use std::{array, convert::TryFrom};
 type Error = Box<dyn std::error::Error>;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Node {
-    id: Vec<u8>,
-    data_hash: Option<Vec<u8>>,
+    id: [u8; HASH_SIZE],
+    data_hash: Option<[u8; HASH_SIZE]>,
     min_byte_range: usize,
     max_byte_range: usize,
     left_child: Option<Box<Node>>,
@@ -67,8 +64,8 @@ impl ProofDeserialize<BranchProof> for BranchProof {
 
 pub const MAX_CHUNK_SIZE: usize = 256 * 1024;
 pub const MIN_CHUNK_SIZE: usize = 32 * 1024;
+pub const HASH_SIZE: usize = 32;
 const NOTE_SIZE: usize = 32;
-const HASH_SIZE: usize = 32;
 
 pub trait Helpers<T> {
     fn to_note_vec(&self) -> Vec<u8>;
@@ -112,7 +109,7 @@ pub fn generate_leaves(data: Vec<u8>, crypto: &Provider) -> Result<Vec<Node>, Er
     let mut leaves = Vec::<Node>::new();
     let mut min_byte_range = 0;
     for chunk in data_chunks.iter() {
-        let data_hash = crypto.hash(&chunk, "SHA256")?;
+        let data_hash = crypto.hash(chunk, "SHA256")?;
         let max_byte_range = min_byte_range + &chunk.len();
         let offset = max_byte_range.to_note_vec();
         let id = crypto.hash_all(vec![&data_hash, &offset], "SHA256")?;
@@ -208,7 +205,7 @@ pub fn resolve_proofs(node: Node, proof: Option<Proof>) -> Result<Vec<Proof>, Er
 // Uses the Node structure instead of an additional Chunk structure since fields were common.
 // TODO: clean up conversions to vec.
 pub fn validate_chunk(
-    mut root_id: Vec<u8>,
+    mut root_id: [u8; HASH_SIZE],
     chunk: Node,
     proof: Proof,
     crypto: &Provider,
@@ -237,8 +234,8 @@ pub fn validate_chunk(
                 // Calculate the id from the proof.
                 let id = crypto.hash_all(
                     vec![
-                        &branch_proof.left_id.to_vec(),
-                        &branch_proof.right_id.to_vec(),
+                        &branch_proof.left_id,
+                        &branch_proof.right_id,
                         &branch_proof.offset().to_note_vec(),
                     ],
                     "SHA256",
@@ -253,14 +250,14 @@ pub fn validate_chunk(
                 // If the offset from the proof is greater than the offset in the data chunk,
                 // then the next id to validate against is from the left.
                 root_id = match max_byte_range > branch_proof.offset() {
-                    true => branch_proof.right_id.to_vec(),
-                    false => branch_proof.left_id.to_vec(),
+                    true => branch_proof.right_id,
+                    false => branch_proof.left_id,
                 }
             }
 
             // Validate leaf, both id and data_hash are correct.
             let id = crypto.hash_all(vec![&data_hash, &max_byte_range.to_note_vec()], "SHA256")?;
-            if !(id == root_id) & !(*data_hash == leaf_proof.data_hash) {
+            if !(id == root_id) & !(data_hash == leaf_proof.data_hash) {
                 println!("id: {:?}, root_id: {:?}", id, root_id);
                 return Err(ArweaveError::InvalidProof.into());
             }
@@ -301,11 +298,11 @@ mod chunk_tests {
         assert_eq!(
             leaves[1],
             Node {
-                id: vec![
+                id: [
                     116, 162, 15, 141, 57, 10, 17, 205, 78, 2, 213, 56, 154, 61, 223, 174, 73, 226,
                     192, 82, 70, 39, 237, 145, 89, 66, 199, 123, 31, 23, 88, 38
                 ],
-                data_hash: Some(vec![
+                data_hash: Some([
                     49, 180, 221, 222, 226, 186, 75, 140, 193, 105, 70, 238, 149, 178, 153, 32,
                     144, 208, 63, 136, 223, 103, 186, 4, 109, 24, 64, 127, 20, 38, 98, 56
                 ]),
@@ -339,7 +336,7 @@ mod chunk_tests {
         assert_eq!(
             branch,
             Node {
-                id: vec![
+                id: [
                     50, 116, 51, 211, 72, 86, 49, 84, 45, 220, 75, 153, 44, 133, 213, 88, 58, 246,
                     8, 202, 100, 249, 227, 0, 10, 177, 116, 187, 113, 95, 41, 10,
                 ],
@@ -366,7 +363,7 @@ mod chunk_tests {
         let layer = build_layer(leaves, &crypto)?;
         assert_eq!(
             layer[0].id,
-            vec![
+            [
                 50, 116, 51, 211, 72, 86, 49, 84, 45, 220, 75, 153, 44, 133, 213, 88, 58, 246, 8,
                 202, 100, 249, 227, 0, 10, 177, 116, 187, 113, 95, 41, 10,
             ]
@@ -390,7 +387,7 @@ mod chunk_tests {
         let root = generate_data_root(leaves, &crypto)?;
         assert_eq!(
             root.id,
-            vec![
+            [
                 80, 80, 69, 118, 15, 123, 97, 51, 235, 63, 130, 216, 210, 76, 201, 220, 236, 7, 49,
                 169, 83, 37, 80, 107, 186, 166, 114, 203, 209, 56, 127, 13,
             ]
@@ -412,7 +409,7 @@ mod chunk_tests {
         let root = generate_data_root(leaves, &crypto)?;
         assert_eq!(
             root.id,
-            vec![
+            [
                 216, 248, 50, 181, 40, 249, 132, 35, 200, 106, 229, 132, 126, 90, 154, 0, 40, 87,
                 155, 74, 122, 236, 32, 170, 181, 74, 80, 15, 126, 87, 83, 253,
             ]
