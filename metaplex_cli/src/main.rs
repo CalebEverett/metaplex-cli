@@ -61,13 +61,10 @@ use crate::config::Config;
 pub mod output;
 use output::{println_display, CliMetadata, CliMint, CliTokenAmount, UiMetadata};
 
-pub mod arweave;
-use arweave::{get_provider, Methods, Provider};
+use arweave_rs::{Arweave, Methods as ArweaveMethods};
 
 type Error = Box<dyn std::error::Error>;
 type CommandResult = Result<Option<(u64, Vec<Vec<Instruction>>)>, Error>;
-
-pub mod arweave2;
 
 // CONSTANTS
 
@@ -558,13 +555,13 @@ fn get_app() -> App<'static, 'static> {
         )
         .subcommand(
             SubCommand::with_name("metadata-info")
-                .about("Query details of a Metadata account by address")
+                .about("Query details of a Metadata account by address.")
                 .arg(generic_address_arg()),
         )
         .subcommand(SubCommand::with_name("filter").arg(generic_address_arg()))
         .subcommand(
             SubCommand::with_name("metadata-create")
-                .about("Create metadata account for existing mint.")
+                .about("Create metadata account for existing token mint.")
                 .arg(mint_address_arg())
                 .arg(update_authority_arg())
                 .metadata_args(),
@@ -626,12 +623,12 @@ fn get_app() -> App<'static, 'static> {
         )
         .subcommand(
             SubCommand::with_name("mint-create")
-                .about("Create a new token")
+                .about("Create a new token.")
                 .mint_args(),
         )
         .subcommand(
             SubCommand::with_name("mint-supply")
-                .about("Get token supply")
+                .about("Get token supply.")
                 .arg(
                     Arg::with_name("address")
                         .validator(is_valid_pubkey)
@@ -873,7 +870,7 @@ async fn main() {
         ("arweave", Some(arg_matches)) => {
             let keypair_path = arg_matches.value_of("keypair_path").unwrap();
 
-            let provider = get_provider(keypair_path).await.unwrap();
+            let provider = Arweave::from_keypair_path(keypair_path).await.unwrap();
             let (sub_sub_command, sub_arg_matches) = arg_matches.subcommand();
 
             match (sub_sub_command, sub_arg_matches) {
@@ -1397,8 +1394,8 @@ fn command_mint(
     Ok(Some((0, vec![instructions])))
 }
 
-async fn command_price(provider: &Provider, bytes: &usize, config: &Config) -> CommandResult {
-    let (winstons_per_kb, usd_per_ar) = provider.price(bytes).await?;
+async fn command_price(provider: &Arweave, bytes: &usize, config: &Config) -> CommandResult {
+    let (winstons_per_kb, usd_per_ar) = provider.get_price(bytes).await?;
     let usd_per_kb = (&winstons_per_kb * &usd_per_ar).to_f32().unwrap() / 1e14_f32;
 
     println_display(
@@ -1411,18 +1408,22 @@ async fn command_price(provider: &Provider, bytes: &usize, config: &Config) -> C
     Ok(None)
 }
 
-async fn command_get_transaction(provider: &Provider, id: &str) -> CommandResult {
-    provider.get_transaction(id).await?;
+async fn command_get_transaction(provider: &Arweave, id: &str) -> CommandResult {
+    let transaction = provider.get_transaction(id).await?;
+    // println!("Fetched transaction{}", transaction.id);
     Ok(None)
 }
 
 async fn command_wallet_balance(
-    provider: &Provider,
+    provider: &Arweave,
     config: &Config,
     wallet_address: Option<String>,
 ) -> CommandResult {
     let mb = u32::pow(1024, 2) as usize;
-    let result = tokio::join!(provider.wallet_balance(wallet_address), provider.price(&mb));
+    let result = tokio::join!(
+        provider.get_wallet_balance(wallet_address),
+        provider.get_price(&mb)
+    );
     let balance = result.0?;
     let (winstons_per_kb, usd_per_ar) = result.1?;
 
@@ -1445,7 +1446,7 @@ async fn command_wallet_balance(
     Ok(None)
 }
 
-async fn command_file_upload(provider: &Provider, filepath: &str) -> CommandResult {
+async fn command_file_upload(provider: &Arweave, filepath: &str) -> CommandResult {
     // let transaction = provider.transaction_from_filepath(filepath).await?;
     // provider.post_transaction(&transaction).await?;
     println!("oneday this will upload ths file:  {}", filepath);

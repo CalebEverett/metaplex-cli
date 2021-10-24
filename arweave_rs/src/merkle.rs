@@ -1,4 +1,4 @@
-use crate::arweave2::{
+use crate::{
     crypto::{Methods, Provider},
     error::ArweaveError,
 };
@@ -270,7 +270,7 @@ pub fn validate_chunk(
 }
 
 #[cfg(test)]
-mod chunk_tests {
+mod tests {
     use super::*;
     use tokio::fs::File;
     use tokio::io::AsyncReadExt;
@@ -286,7 +286,7 @@ mod chunk_tests {
 
     #[tokio::test]
     async fn test_generate_leaves() -> Result<(), Error> {
-        let crypto = Provider::new(
+        let crypto = Provider::from_keypair_path(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
         )
         .await?;
@@ -317,7 +317,7 @@ mod chunk_tests {
 
     #[tokio::test]
     async fn test_hash_branch() -> Result<(), Error> {
-        let crypto = Provider::new(
+        let crypto = Provider::from_keypair_path(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
         )
         .await?;
@@ -351,7 +351,7 @@ mod chunk_tests {
     }
     #[tokio::test]
     async fn test_build_layer() -> Result<(), Error> {
-        let crypto = Provider::new(
+        let crypto = Provider::from_keypair_path(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
         )
         .await?;
@@ -375,7 +375,7 @@ mod chunk_tests {
 
     #[tokio::test]
     async fn test_generate_data_root() -> Result<(), Error> {
-        let crypto = Provider::new(
+        let crypto = Provider::from_keypair_path(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
         )
         .await?;
@@ -397,7 +397,7 @@ mod chunk_tests {
 
     #[tokio::test]
     async fn test_generate_data_root_one_chunk() -> Result<(), Error> {
-        let crypto = Provider::new(
+        let crypto = Provider::from_keypair_path(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
         )
         .await?;
@@ -419,7 +419,7 @@ mod chunk_tests {
 
     #[tokio::test]
     async fn test_generate_proofs() -> Result<(), Error> {
-        let crypto = Provider::new(
+        let crypto = Provider::from_keypair_path(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
         )
         .await?;
@@ -516,7 +516,7 @@ mod chunk_tests {
     }
     #[tokio::test]
     async fn test_validate_chunks() -> Result<(), Error> {
-        let crypto = Provider::new(
+        let crypto = Provider::from_keypair_path(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
         )
         .await?;
