@@ -1446,8 +1446,9 @@ async fn command_wallet_balance(
 }
 
 async fn command_file_upload(provider: &Provider, filepath: &str) -> CommandResult {
-    let transaction = provider.transaction_from_filepath(filepath).await?;
-    provider.post_transaction(&transaction).await?;
+    // let transaction = provider.transaction_from_filepath(filepath).await?;
+    // provider.post_transaction(&transaction).await?;
+    println!("oneday this will upload ths file:  {}", filepath);
     Ok(None)
 }
 
