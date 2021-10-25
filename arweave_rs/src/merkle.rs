@@ -109,10 +109,10 @@ pub fn generate_leaves(data: Vec<u8>, crypto: &Provider) -> Result<Vec<Node>, Er
     let mut leaves = Vec::<Node>::new();
     let mut min_byte_range = 0;
     for chunk in data_chunks.iter() {
-        let data_hash = crypto.hash(chunk, "SHA256")?;
+        let data_hash = crypto.hash_SHA256(chunk)?;
         let max_byte_range = min_byte_range + &chunk.len();
         let offset = max_byte_range.to_note_vec();
-        let id = crypto.hash_all(vec![&data_hash, &offset], "SHA256")?;
+        let id = crypto.hash_all_SHA256(vec![&data_hash, &offset])?;
 
         leaves.push(Node {
             id,
@@ -129,7 +129,7 @@ pub fn generate_leaves(data: Vec<u8>, crypto: &Provider) -> Result<Vec<Node>, Er
 
 pub fn hash_branch(left: Node, right: Node, crypto: &Provider) -> Result<Node, Error> {
     let max_byte_range = left.max_byte_range.to_note_vec();
-    let id = crypto.hash_all(vec![&left.id, &right.id, &max_byte_range], "SHA256")?;
+    let id = crypto.hash_all_SHA256(vec![&left.id, &right.id, &max_byte_range])?;
     Ok(Node {
         id,
         data_hash: None,
@@ -232,14 +232,11 @@ pub fn validate_chunk(
             // Validate branches.
             for branch_proof in branch_proofs.iter() {
                 // Calculate the id from the proof.
-                let id = crypto.hash_all(
-                    vec![
-                        &branch_proof.left_id,
-                        &branch_proof.right_id,
-                        &branch_proof.offset().to_note_vec(),
-                    ],
-                    "SHA256",
-                )?;
+                let id = crypto.hash_all_SHA256(vec![
+                    &branch_proof.left_id,
+                    &branch_proof.right_id,
+                    &branch_proof.offset().to_note_vec(),
+                ])?;
 
                 // Ensure calculated id correct.
                 if !(id == root_id) {
@@ -256,7 +253,7 @@ pub fn validate_chunk(
             }
 
             // Validate leaf, both id and data_hash are correct.
-            let id = crypto.hash_all(vec![&data_hash, &max_byte_range.to_note_vec()], "SHA256")?;
+            let id = crypto.hash_all_SHA256(vec![&data_hash, &max_byte_range.to_note_vec()])?;
             if !(id == root_id) & !(data_hash == leaf_proof.data_hash) {
                 println!("id: {:?}, root_id: {:?}", id, root_id);
                 return Err(ArweaveError::InvalidProof.into());
@@ -276,7 +273,6 @@ mod tests {
     use tokio::io::AsyncReadExt;
 
     #[test]
-
     fn test_get_chunk_size() -> () {
         assert_eq!(get_chunk_size(MIN_CHUNK_SIZE), MIN_CHUNK_SIZE);
         assert_eq!(get_chunk_size(MAX_CHUNK_SIZE), MAX_CHUNK_SIZE);

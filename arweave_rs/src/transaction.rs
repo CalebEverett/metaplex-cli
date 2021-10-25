@@ -1,9 +1,8 @@
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_aux::field_attributes::deserialize_number_from_string;
-use std::str;
+use std::str::FromStr;
 
 use async_trait::async_trait;
-
 use infer;
 use log::debug;
 use num_bigint::BigUint;
@@ -17,35 +16,83 @@ use url::Url;
 
 type Error = Box<dyn std::error::Error>;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Transaction {
-    format: u8,
+    pub format: u8,
     pub id: Base64,
-    last_tx: Base64,
-    owner: Base64,
-    tags: Option<Vec<Tag>>,
-    target: Option<Base64>,
+    pub last_tx: Base64,
+    pub owner: Base64,
+    pub tags: Vec<Tag>,
+    pub target: Base64,
     #[serde(deserialize_with = "deserialize_number_from_string")]
-    quantity: u64,
-    data_root: Option<Base64>,
-    data: Option<Base64>,
+    pub quantity: u64,
+    pub data_root: Base64,
+    pub data: Base64,
     #[serde(deserialize_with = "deserialize_number_from_string")]
-    data_size: u64,
-    reward: String,
-    signature: Base64,
+    pub data_size: u64,
+    #[serde(deserialize_with = "deserialize_number_from_string")]
+    pub reward: u64,
+    pub signature: Base64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Tag {
-    name: String,
-    value: String,
+pub struct Tag {
+    pub name: Base64,
+    pub value: Base64,
 }
 
-#[derive(Debug)]
-pub struct Base64(Vec<u8>);
+pub trait ToSlices<'a, T> {
+    fn to_slices(&'a self) -> Result<Vec<Vec<&'a [u8]>>, Error>;
+}
+
+impl<'a> ToSlices<'a, Vec<Tag>> for Vec<Tag> {
+    fn to_slices(&'a self) -> Result<Vec<Vec<&'a [u8]>>, Error> {
+        let result = self
+            .iter()
+            .map(|t| vec![&t.name.0[..], &t.value.0[..]])
+            .collect();
+        Ok(result)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Base64(pub Vec<u8>);
 impl Serialize for Base64 {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_str(&format!("{}", &self))
+    }
+}
+
+impl Default for Base64 {
+    fn default() -> Self {
+        Base64(vec![])
+    }
+}
+
+/// Converts a base64url encoded string to a Base64 struct.
+impl FromStr for Base64 {
+    type Err = base64::DecodeError;
+    fn from_str(str: &str) -> Result<Self, Self::Err> {
+        let result = base64::decode_config(str, base64::URL_SAFE_NO_PAD)?;
+        Ok(Self(result))
+    }
+}
+
+/// Handles conversion of unencoded strings through to base64url and back to bytes.
+pub trait ConvertUtf8<T> {
+    fn from_utf8_str(str: &str) -> Result<T, Error>;
+    fn to_utf8_string(&self) -> Result<String, Error>;
+}
+
+impl ConvertUtf8<Base64> for Base64 {
+    fn from_utf8_str(str: &str) -> Result<Self, Error> {
+        let result = base64::encode_config(str, base64::URL_SAFE_NO_PAD);
+        Ok(Self(result.as_bytes().to_vec()))
+    }
+    fn to_utf8_string(&self) -> Result<String, Error> {
+        let bytes_vec = base64::decode_config(&self.0, base64::URL_SAFE_NO_PAD)?;
+        let string = String::from_utf8(bytes_vec)?;
+        Ok(string)
     }
 }
 
@@ -62,7 +109,7 @@ impl<'de> Deserialize<'de> for Base64 {
             fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
                 base64::decode_config(v, base64::URL_SAFE_NO_PAD)
                     .map(Base64)
-                    .map_err(de::Error::custom)
+                    .map_err(|_| de::Error::custom("failed to decode base64 string"))
             }
         }
         deserializer.deserialize_str(Vis)
@@ -174,4 +221,75 @@ async fn transaction_from_filepath(file_path: &str) -> Result<(), Error> {
 
     // debug!("trnsaction {:?}", &transaction);
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::{Base64, ConvertUtf8, Error, Tag, ToSlices};
+    // use serde::{self, de, Deserialize, Deserializer, Serialize, Serializer};
+    use serde_json;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_deserialize_base64() -> Result<(), Error> {
+        let base_64 = Base64(vec![44; 7]);
+        assert_eq!(base_64.0, vec![44; 7]);
+        assert_eq!(format!("{}", base_64), "LCwsLCwsLA");
+
+        let base_64: Base64 = serde_json::from_str("\"LCwsLCwsLA\"")?;
+        assert_eq!(base_64.0, vec![44; 7]);
+        assert_eq!(format!("{}", base_64), "LCwsLCwsLA");
+        Ok(())
+    }
+
+    #[test]
+    fn test_base64_convert_utf8() -> Result<(), Error> {
+        let string_b64 = Base64::from_utf8_str("gnarlycharcters[-093210342/~==%$")?;
+        assert_eq!(
+            "gnarlycharcters[-093210342/~==%$".to_string(),
+            string_b64.to_utf8_string()?
+        );
+        let string_b64 = Base64::from_utf8_str("foo")?;
+        assert_eq!("foo".to_string(), string_b64.to_utf8_string()?);
+        assert_eq!("Wm05dg".to_string(), string_b64.to_string());
+        Ok(())
+    }
+
+    #[test]
+    fn test_transaction_slices() -> Result<(), Error> {
+        let tags = Vec::<Tag>::new();
+        assert_eq!(tags.to_slices()?, Vec::<Vec<&[u8]>>::new());
+
+        let tags = vec![
+            Tag {
+                name: Base64::from_utf8_str("Content-Type")?,
+                value: Base64::from_utf8_str("text/html")?,
+            },
+            Tag {
+                name: Base64::from_utf8_str("key2")?,
+                value: Base64::from_utf8_str("value2")?,
+            },
+        ];
+
+        assert_eq!(
+            "UTI5dWRHVnVkQzFVZVhCbA".to_string(),
+            tags[0].name.to_string()
+        );
+
+        assert_eq!("Content-Type".to_string(), tags[0].name.to_utf8_string()?);
+        let tag_slices = tags.to_slices()?;
+        println!("{:?}", tag_slices);
+        assert_eq!(tag_slices.len(), 2);
+        tag_slices.iter().for_each(|f| assert_eq!(f.len(), 2));
+        assert_eq!(
+            tag_slices[0][0],
+            &[81, 50, 57, 117, 100, 71, 86, 117, 100, 67, 49, 85, 101, 88, 66, 108][..]
+        );
+        assert_eq!(
+            tag_slices[0][1],
+            &[100, 71, 86, 52, 100, 67, 57, 111, 100, 71, 49, 115][..]
+        );
+        assert_eq!(tag_slices[1][0], &[97, 50, 86, 53, 77, 103][..]);
+        assert_eq!(tag_slices[1][1], &[100, 109, 70, 115, 100, 87, 85, 121][..]);
+        Ok(())
+    }
 }

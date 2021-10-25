@@ -173,7 +173,7 @@ impl Methods<Arweave> for Arweave {
     async fn get_transaction(&self, id: &str) -> Result<Transaction, Error> {
         let url = self.base_url.join("tx/")?.join(id)?;
         let resp = reqwest::get(url).await?.json::<Transaction>().await?;
-        println!("{}", resp.id);
+        println!("{owner:?}", owner = resp.owner.0);
         Ok(resp)
     }
 
@@ -197,11 +197,7 @@ impl Methods<Arweave> for Arweave {
             .await?;
         debug!("trnsaction {:?}", &resp.url());
         assert_eq!(resp.status().as_u16(), 200);
-
-        println!(
-            "Posted transaction: https://arweave.net/{}",
-            &transaction.id
-        );
+        println!("Posted transaction: https://arweave.net/{}", transaction.id);
         Ok(())
     }
 }
