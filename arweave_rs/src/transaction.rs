@@ -1,18 +1,7 @@
+use crate::merkle::{Node, Proof};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_aux::field_attributes::deserialize_number_from_string;
 use std::str::FromStr;
-
-use async_trait::async_trait;
-use infer;
-use log::debug;
-use num_bigint::BigUint;
-use reqwest::{
-    self,
-    header::{ACCEPT, CONTENT_TYPE},
-};
-
-use tokio::{fs::File, io::AsyncReadExt};
-use url::Url;
 
 type Error = Box<dyn std::error::Error>;
 
@@ -33,6 +22,10 @@ pub struct Transaction {
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub reward: u64,
     pub signature: Base64,
+    #[serde(skip)]
+    pub chunks: Vec<Node>,
+    #[serde(skip)]
+    pub proofs: Vec<Proof>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -124,105 +117,6 @@ impl std::fmt::Display for Base64 {
     }
 }
 
-async fn transaction_from_filepath(file_path: &str) -> Result<(), Error> {
-    // Read file to buffer
-    let mut file = File::open(file_path).await?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).await?;
-
-    // // Calc data_size and encode.
-    // let data_size = &buffer.len();
-    // let data = buffer.to_base64_string()?;
-
-    // // Get cost of upload as reward and encode
-    // // along with data_size.
-    // let reward = self
-    //     .price(&data_size)
-    //     .await
-    //     .and_then(|p| Ok(p.0.to_string()))?;
-
-    // let data_size = data_size.to_string();
-
-    // // Determine mime type - simplification that anything not identified is
-    // // application/json - and create tags. Encoded tags needed for
-    // // calculation of data_root.
-    // let content_type = if let Some(kind) = infer::get(&buffer) {
-    //     kind.mime_type()
-    // } else {
-    //     "application/json"
-    // };
-    // let tag_name = "Content-Type".to_base64_string()?;
-    // let tag_value = content_type.to_base64_string()?;
-    // let tags = vec![Tag {
-    //     name: tag_name,
-    //     value: tag_value,
-    // }];
-    // let serialized_tags = serde_json::to_string(&tags).unwrap();
-
-    // // Get tx_acnchor - already encoded.
-    // let last_tx = reqwest::get(self.base_url.join("tx_anchor").unwrap())
-    //     .await?
-    //     .text()
-    //     .await?;
-
-    // // let last_tx = "".to_string();
-
-    // // Get owner, same as wallet address.
-    // // let owner = self
-    // //     .keypair
-    // //     .public_key()
-    // //     .modulus()
-    // //     .big_endian_without_leading_zero();
-
-    // let format = "2".to_string();
-
-    // // Include empty strings for quantity and target.
-    // let quantity = "".to_string();
-    // let target = "".to_string();
-
-    // // Calculate merkle root as data_root.
-    // let base64_fields = [
-    //     &format,
-    //     // &owner,
-    //     &target,
-    //     &data_size,
-    //     &quantity,
-    //     &reward,
-    //     &last_tx,
-    //     &serialized_tags,
-    // ];
-    // let hashed_base64_fields =
-    //     try_join_all(base64_fields.map(|s| hash_sha384(s.as_bytes()))).await?;
-
-    // let data_root = &hashed_base64_fields
-    //     .into_iter()
-    //     .flatten()
-    //     .collect::<Vec<u8>>()[..];
-
-    // // Sign and encode data_root as id.
-    // let signature = self.sign(&data_root).await?;
-
-    // let id = hash_sha256(&signature.as_ref()).await?.to_base64_string()?;
-
-    // // Create transaction.
-    // let transaction = Transaction {
-    //     format: 2,
-    //     id,
-    //     last_tx,
-    //     // owner,
-    //     tags: Some(tags),
-    //     target: Some(target),
-    //     quantity: Some(quantity),
-    //     data_root: data_root.to_base64_string()?,
-    //     data_size,
-    //     data,
-    //     reward,
-    //     signature: signature.to_base64_string()?,
-    // };
-
-    // debug!("trnsaction {:?}", &transaction);
-    Ok(())
-}
 #[cfg(test)]
 mod tests {
     use super::{Base64, ConvertUtf8, Error, Tag, ToSlices};

@@ -5,22 +5,25 @@ use crate::{
 use borsh::BorshDeserialize;
 type Error = Box<dyn std::error::Error>;
 
+/// Single struct used for chunks and nodes.
 #[derive(Debug, PartialEq, Clone)]
 pub struct Node {
-    id: [u8; HASH_SIZE],
-    data_hash: Option<[u8; HASH_SIZE]>,
-    min_byte_range: usize,
-    max_byte_range: usize,
-    left_child: Option<Box<Node>>,
-    right_child: Option<Box<Node>>,
+    pub id: [u8; HASH_SIZE],
+    pub data_hash: Option<[u8; HASH_SIZE]>,
+    pub min_byte_range: usize,
+    pub max_byte_range: usize,
+    pub left_child: Option<Box<Node>>,
+    pub right_child: Option<Box<Node>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Proof {
-    offset: usize,
-    proof: Vec<u8>,
+    pub offset: usize,
+    pub proof: Vec<u8>,
 }
 
+/// Uses Borsh to deserialze [u8] chunk proofs into
+/// nodes to make it easier to reason about validation.
 #[repr(C)]
 #[derive(BorshDeserialize, Debug, PartialEq, Clone)]
 pub struct LeafProof {
@@ -69,7 +72,6 @@ const NOTE_SIZE: usize = 32;
 
 pub trait Helpers<T> {
     fn to_note_vec(&self) -> Vec<u8>;
-    // fn from_note_slice(slice: &[u8]) -> usize;
 }
 
 impl Helpers<usize> for usize {
@@ -78,15 +80,6 @@ impl Helpers<usize> for usize {
         note.extend((*self as u64).to_be_bytes());
         note
     }
-    // fn offset_from_proof_slice(slice: &[u8]) -> usize {
-    //     let hash_len = match slice.len() {
-    //         HASH_SIZE + NOTE_SIZE => array_ref![slice, HASH_SIZE, 8],
-    //         2 * HASH_SIZE + NOTE_SIZE =
-    //     }
-    //     if slice.len() == HASH_SIZE + NOTE_SIZE {
-    //         usize::from_be_bytes(*)
-
-    // usize::from_be_bytes(*offset_slice)
 }
 
 /// Ensures there are always an even number of chunks.
@@ -127,6 +120,7 @@ pub fn generate_leaves(data: Vec<u8>, crypto: &Provider) -> Result<Vec<Node>, Er
     Ok(leaves)
 }
 
+/// Hashes together a single branch node from a pair of child nodes.
 pub fn hash_branch(left: Node, right: Node, crypto: &Provider) -> Result<Node, Error> {
     let max_byte_range = left.max_byte_range.to_note_vec();
     let id = crypto.hash_all_SHA256(vec![&left.id, &right.id, &max_byte_range])?;
@@ -140,6 +134,7 @@ pub fn hash_branch(left: Node, right: Node, crypto: &Provider) -> Result<Node, E
     })
 }
 
+/// Builds one layer of branch nodes from a layer of child nodes.
 pub fn build_layer<'a>(nodes: Vec<Node>, crypto: &Provider) -> Result<Vec<Node>, Error> {
     let mut layer = Vec::<Node>::with_capacity(&nodes.len() / 2);
     let mut nodes_iter = nodes.into_iter();
@@ -149,6 +144,7 @@ pub fn build_layer<'a>(nodes: Vec<Node>, crypto: &Provider) -> Result<Vec<Node>,
     Ok(layer)
 }
 
+/// Builds all layers from leaves up to single root node.
 pub fn generate_data_root(mut nodes: Vec<Node>, crypto: &Provider) -> Result<Node, Error> {
     while nodes.len() > 1 {
         nodes = build_layer(nodes, &crypto)?;
@@ -202,8 +198,7 @@ pub fn resolve_proofs(node: Node, proof: Option<Proof>) -> Result<Vec<Proof>, Er
     }
 }
 
-// Uses the Node structure instead of an additional Chunk structure since fields were common.
-// TODO: clean up conversions to vec.
+// Uses a single Node for chunks, leaves and branches.
 pub fn validate_chunk(
     mut root_id: [u8; HASH_SIZE],
     chunk: Node,
@@ -252,7 +247,7 @@ pub fn validate_chunk(
                 }
             }
 
-            // Validate leaf, both id and data_hash are correct.
+            // Validate leaf: both id and data_hash are correct.
             let id = crypto.hash_all_SHA256(vec![&data_hash, &max_byte_range.to_note_vec()])?;
             if !(id == root_id) & !(data_hash == leaf_proof.data_hash) {
                 println!("id: {:?}, root_id: {:?}", id, root_id);

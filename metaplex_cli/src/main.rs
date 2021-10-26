@@ -964,7 +964,7 @@ fn get_filtered_program_accounts(config: &Config, address: Pubkey) -> CommandRes
             RpcFilterType::DataSize(MAX_METADATA_LEN as u64),
             RpcFilterType::Memcmp(Memcmp {
                 offset: 33,
-                bytes: MemcmpEncodedBytes::Binary(address.to_string()),
+                bytes: MemcmpEncodedBytes::Base58(address.to_string()),
                 encoding: None,
             }),
         ]),
@@ -1410,7 +1410,7 @@ async fn command_price(provider: &Arweave, bytes: &usize, config: &Config) -> Co
 
 async fn command_get_transaction(provider: &Arweave, id: &str) -> CommandResult {
     let transaction = provider.get_transaction(id).await?;
-    // println!("Fetched transaction{}", transaction.id);
+    println!("Fetched transaction{}", transaction.id);
     Ok(None)
 }
 

@@ -1,19 +1,10 @@
 use async_trait::async_trait;
-
-use futures::future::try_join_all;
-
 use infer;
-use jsonwebkey::JsonWebKey;
 use log::debug;
 use num_bigint::BigUint;
 use reqwest::{
     self,
     header::{ACCEPT, CONTENT_TYPE},
-};
-use ring::{
-    digest::{Context, SHA256, SHA384},
-    rand,
-    signature::{self, KeyPair, RsaKeyPair},
 };
 use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncReadExt};
@@ -23,77 +14,42 @@ pub mod crypto;
 pub mod error;
 pub mod merkle;
 pub mod transaction;
-use crypto::Methods as CryptoMethods;
-use transaction::Transaction;
 
-type Error = Box<dyn std::error::Error>;
+use crypto::Methods as CryptoMethods;
+use merkle::{generate_data_root, generate_leaves, resolve_proofs};
+use transaction::{Base64, Transaction};
+
+pub type Error = Box<dyn std::error::Error>;
 
 pub struct Arweave {
     pub name: String,
     pub units: String,
-    base_url: Url,
-    crypto: crypto::Provider,
+    pub base_url: Url,
+    pub crypto: crypto::Provider,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct OraclePrice {
-    arweave: OraclePricePair,
+    pub arweave: OraclePricePair,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct OraclePricePair {
-    usd: f32,
+    pub usd: f32,
 }
 
-pub trait EncDec {
-    fn decode_base64_bytes(&self) -> Result<Vec<u8>, Error>;
-}
-pub trait Base64Encode {
-    fn to_base64_string(&self) -> Result<String, Error>;
-}
-
-impl EncDec for String {
-    fn decode_base64_bytes(&self) -> Result<Vec<u8>, Error> {
-        base64::decode_config(self, base64::URL_SAFE_NO_PAD).map_err(|e| e.into())
-    }
-}
-
-impl Base64Encode for String {
-    fn to_base64_string(&self) -> Result<String, Error> {
-        let base64_string: String = base64::encode_config(self.as_bytes(), base64::URL_SAFE_NO_PAD);
-        Ok(base64_string)
-    }
-}
-
-impl Base64Encode for &str {
-    fn to_base64_string(&self) -> Result<String, Error> {
-        let base64_string: String = base64::encode_config(self, base64::URL_SAFE_NO_PAD);
-        Ok(base64_string)
-    }
-}
-
-impl Base64Encode for &[u8] {
-    fn to_base64_string(&self) -> Result<String, Error> {
-        let base64_string = base64::encode_config(self, base64::URL_SAFE_NO_PAD);
-        Ok(base64_string)
-    }
-}
-
-impl Base64Encode for Vec<u8> {
-    fn to_base64_string(&self) -> Result<String, Error> {
-        let base64_string: String = base64::encode_config(self, base64::URL_SAFE_NO_PAD);
-        Ok(base64_string)
-    }
-}
+//
 
 #[async_trait]
 pub trait Methods<T> {
     async fn from_keypair_path(keypair_path: &str) -> Result<T, Error>;
-    fn get_wallet_address(&self) -> Result<String, Error>;
     async fn get_wallet_balance(&self, wallet_address: Option<String>) -> Result<BigUint, Error>;
     async fn get_price(&self, bytes: &usize) -> Result<(BigUint, BigUint), Error>;
     async fn get_transaction(&self, id: &str) -> Result<Transaction, Error>;
-    async fn create_transaction_from_file_path(&self, file_path: &str) -> Result<(), Error>;
+    async fn create_transaction_from_file_path(
+        &self,
+        file_path: &str,
+    ) -> Result<Transaction, Error>;
     async fn post_transaction(&self, transaction: &Transaction) -> Result<(), Error>;
 }
 
@@ -107,42 +63,13 @@ impl Methods<Arweave> for Arweave {
             crypto: crypto::Provider::from_keypair_path(keypair_path).await?,
         })
     }
-    /// Calculates the wallet address of the provided keypair according to [addressing](https://docs.arweave.org/developers/server/http-api#addressing)
-    /// in documentation.
-    ///```
-    /// # use ring::{signature, rand};
-    /// # use arweave_rs::{Arweave, Methods};
-    /// #
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let arweave = Arweave::from_keypair_path("tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json").await?;
-    /// let calc = arweave.get_wallet_address()?;
-    /// let actual = String::from("7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg");
-    /// assert_eq!(&calc, &actual);
-    /// # Ok(())
-    /// # }
-    /// ```
-    fn get_wallet_address(&self) -> Result<String, Error> {
-        let mut context = Context::new(&SHA256);
-        let modulus = self
-            .crypto
-            .keypair
-            .public_key()
-            .modulus()
-            .big_endian_without_leading_zero();
-        context.update(modulus);
-
-        // let wallet_address = base64::encode_config(context.finish(), base64::URL_SAFE_NO_PAD);
-        let wallet_address = context.finish().as_ref().to_base64_string()?;
-        Ok(wallet_address)
-    }
 
     /// Returns the balance of the wallet.
     async fn get_wallet_balance(&self, wallet_address: Option<String>) -> Result<BigUint, Error> {
         let wallet_address = if let Some(wallet_address) = wallet_address {
             wallet_address
         } else {
-            self.get_wallet_address()?
+            self.crypto.wallet_address()?.to_string()
         };
         let url = self
             .base_url
@@ -177,12 +104,30 @@ impl Methods<Arweave> for Arweave {
         Ok(resp)
     }
 
-    async fn create_transaction_from_file_path(&self, file_path: &str) -> Result<(), Error> {
-        // Read file to buffer
+    async fn create_transaction_from_file_path(
+        &self,
+        file_path: &str,
+    ) -> Result<Transaction, Error> {
         let mut file = File::open(file_path).await?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).await?;
-        Ok(())
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).await?;
+
+        let chunks = generate_leaves(data.clone(), &self.crypto)?;
+        let root = generate_data_root(chunks.clone(), &self.crypto)?;
+        let data_root = Base64(root.id.clone().into_iter().collect());
+        let proofs = resolve_proofs(root, None)?;
+        let owner = self.crypto.keypair_modulus()?;
+
+        Ok(Transaction {
+            format: 2,
+            data_size: data.len() as u64,
+            data: Base64(data),
+            data_root,
+            chunks,
+            proofs,
+            owner,
+            ..Default::default()
+        })
     }
 
     async fn post_transaction(&self, transaction: &Transaction) -> Result<(), Error> {
@@ -201,3 +146,95 @@ impl Methods<Arweave> for Arweave {
         Ok(())
     }
 }
+
+// // Calc data_size and encode.
+// let data_size = &buffer.len();
+// let data = buffer.to_base64_string()?;
+
+// // Get cost of upload as reward and encode
+// // along with data_size.
+// let reward = self
+//     .price(&data_size)
+//     .await
+//     .and_then(|p| Ok(p.0.to_string()))?;
+
+// let data_size = data_size.to_string();
+
+// // Determine mime type - simplification that anything not identified is
+// // application/json - and create tags. Encoded tags needed for
+// // calculation of data_root.
+// let content_type = if let Some(kind) = infer::get(&buffer) {
+//     kind.mime_type()
+// } else {
+//     "application/json"
+// };
+// let tag_name = "Content-Type".to_base64_string()?;
+// let tag_value = content_type.to_base64_string()?;
+// let tags = vec![Tag {
+//     name: tag_name,
+//     value: tag_value,
+// }];
+// let serialized_tags = serde_json::to_string(&tags).unwrap();
+
+// // Get tx_acnchor - already encoded.
+// let last_tx = reqwest::get(self.base_url.join("tx_anchor").unwrap())
+//     .await?
+//     .text()
+//     .await?;
+
+// // let last_tx = "".to_string();
+
+// // Get owner, same as wallet address.
+// // let owner = self
+// //     .keypair
+// //     .public_key()
+// //     .modulus()
+// //     .big_endian_without_leading_zero();
+
+// let format = "2".to_string();
+
+// // Include empty strings for quantity and target.
+// let quantity = "".to_string();
+// let target = "".to_string();
+
+// // Calculate merkle root as data_root.
+// let base64_fields = [
+//     &format,
+//     // &owner,
+//     &target,
+//     &data_size,
+//     &quantity,
+//     &reward,
+//     &last_tx,
+//     &serialized_tags,
+// ];
+// let hashed_base64_fields =
+//     try_join_all(base64_fields.map(|s| hash_sha384(s.as_bytes()))).await?;
+
+// let data_root = &hashed_base64_fields
+//     .into_iter()
+//     .flatten()
+//     .collect::<Vec<u8>>()[..];
+
+// // Sign and encode data_root as id.
+// let signature = self.sign(&data_root).await?;
+
+// let id = hash_sha256(&signature.as_ref()).await?.to_base64_string()?;
+
+// // Create transaction.
+// let transaction = Transaction {
+//     format: 2,
+//     id,
+//     last_tx,
+//     // owner,
+//     tags: Some(tags),
+//     target: Some(target),
+//     quantity: Some(quantity),
+//     data_root: data_root.to_base64_string()?,
+//     data_size,
+//     data,
+//     reward,
+//     signature: signature.to_base64_string()?,
+// };
+
+// debug!("trnsaction {:?}", &transaction);
