@@ -86,13 +86,14 @@ pub trait ConvertUtf8<T> {
 
 impl ConvertUtf8<Base64> for Base64 {
     fn from_utf8_str(str: &str) -> Result<Self, Error> {
-        let result = base64::encode_config(str, base64::URL_SAFE_NO_PAD);
-        Ok(Self(result.as_bytes().to_vec()))
+        let enc_string = base64::encode_config(str.as_bytes(), base64::URL_SAFE_NO_PAD);
+        let dec_bytes = base64::decode_config(enc_string, base64::URL_SAFE_NO_PAD)?;
+        Ok(Self(dec_bytes))
     }
     fn to_utf8_string(&self) -> Result<String, Error> {
-        let bytes_vec = base64::decode_config(&self.0, base64::URL_SAFE_NO_PAD)?;
-        let string = String::from_utf8(bytes_vec)?;
-        Ok(string)
+        let enc_string = base64::encode_config(&self.0, base64::URL_SAFE_NO_PAD);
+        let dec_bytes = base64::decode_config(enc_string, base64::URL_SAFE_NO_PAD)?;
+        Ok(String::from_utf8(dec_bytes)?)
     }
 }
 
@@ -243,14 +244,21 @@ mod tests {
 
     #[test]
     fn test_base64_convert_utf8() -> Result<(), Error> {
-        let string_b64 = Base64::from_utf8_str("gnarlycharcters[-093210342/~==%$")?;
-        assert_eq!(
-            "gnarlycharcters[-093210342/~==%$".to_string(),
-            string_b64.to_utf8_string()?
-        );
-        let string_b64 = Base64::from_utf8_str("foo")?;
-        assert_eq!("foo".to_string(), string_b64.to_utf8_string()?);
-        assert_eq!("Wm05dg".to_string(), string_b64.to_string());
+        let foo_b64 = Base64::from_utf8_str("foo")?;
+        assert_eq!(foo_b64.0, vec![102, 111, 111]);
+
+        let foo_b64 = Base64(vec![102, 111, 111]);
+        assert_eq!(foo_b64.to_utf8_string()?, "foo".to_string());
+        Ok(())
+    }
+
+    #[test]
+    fn test_base64_convert_string() -> Result<(), Error> {
+        let foo_b64 = Base64::from_str("LCwsLCwsLA")?;
+        assert_eq!(foo_b64.0, vec![44; 7]);
+
+        let foo_b64 = Base64(vec![44; 7]);
+        assert_eq!(foo_b64.to_string(), "LCwsLCwsLA".to_string());
         Ok(())
     }
 
@@ -270,26 +278,23 @@ mod tests {
             },
         ];
 
-        assert_eq!(
-            "UTI5dWRHVnVkQzFVZVhCbA".to_string(),
-            tags[0].name.to_string()
-        );
-
         assert_eq!("Content-Type".to_string(), tags[0].name.to_utf8_string()?);
+        assert_eq!("Q29udGVudC1UeXBl".to_string(), tags[0].name.to_string());
+
         let tag_slices = tags.to_slices()?;
         println!("{:?}", tag_slices);
         assert_eq!(tag_slices.len(), 2);
         tag_slices.iter().for_each(|f| assert_eq!(f.len(), 2));
         assert_eq!(
             tag_slices[0][0],
-            &[81, 50, 57, 117, 100, 71, 86, 117, 100, 67, 49, 85, 101, 88, 66, 108][..]
+            &[67, 111, 110, 116, 101, 110, 116, 45, 84, 121, 112, 101][..]
         );
         assert_eq!(
             tag_slices[0][1],
-            &[100, 71, 86, 52, 100, 67, 57, 111, 100, 71, 49, 115][..]
+            &[116, 101, 120, 116, 47, 104, 116, 109, 108][..]
         );
-        assert_eq!(tag_slices[1][0], &[97, 50, 86, 53, 77, 103][..]);
-        assert_eq!(tag_slices[1][1], &[100, 109, 70, 115, 100, 87, 85, 121][..]);
+        assert_eq!(tag_slices[1][0], &[107, 101, 121, 50][..]);
+        assert_eq!(tag_slices[1][1], &[118, 97, 108, 117, 101, 50][..]);
         Ok(())
     }
 }
