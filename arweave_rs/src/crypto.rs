@@ -9,7 +9,7 @@ use ring::{
 use tokio::{fs::File, io::AsyncReadExt};
 
 type Error = Box<dyn std::error::Error>;
-use crate::transaction::{Base64, Tag, ToSlices};
+use crate::transaction::{Base64, Tag, ToSlices, Transaction};
 
 pub struct Provider {
     pub keypair: RsaKeyPair,
@@ -31,14 +31,15 @@ pub trait Methods {
     fn hash_all_SHA256(&self, messages: Vec<&[u8]>) -> Result<[u8; 32], Error>;
     #[allow(non_snake_case)]
     fn hash_all_SHA384(&self, messages: Vec<&[u8]>) -> Result<[u8; 48], Error>;
+    fn concat_u8_48(&self, left: [u8; 48], right: [u8; 48]) -> Result<[u8; 96], Error>;
     fn deep_hash_list(
         &self,
         data_len: usize,
         data: Vec<&[u8]>,
         hash: Option<[u8; 48]>,
     ) -> Result<[u8; 48], Error>;
-    fn deep_hash_tags(&self, tags: Vec<Tag>) -> Result<[u8; 48], Error>;
-    fn concat_u8_48(&self, left: [u8; 48], right: [u8; 48]) -> Result<[u8; 96], Error>;
+    fn deep_hash_tags(&self, tags: &Vec<Tag>) -> Result<[u8; 48], Error>;
+    fn deep_hash(&self, transaction: &Transaction) -> Result<[u8; 48], Error>;
 }
 
 #[async_trait]
@@ -72,7 +73,7 @@ impl Methods for Provider {
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let arweave = Arweave::from_keypair_path("tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json").await?;
+    /// let arweave = Arweave::from_keypair_path("tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json", None).await?;
     /// let calc = arweave.crypto.wallet_address()?;
     /// let actual = String::from("7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg");
     /// assert_eq!(&calc.to_string(), &actual);
@@ -157,6 +158,12 @@ impl Methods for Provider {
         Ok(hash)
     }
 
+    fn concat_u8_48(&self, left: [u8; 48], right: [u8; 48]) -> Result<[u8; 96], Error> {
+        let mut iter = left.into_iter().chain(right);
+        let result = [(); 96].map(|_| iter.next().unwrap());
+        Ok(result)
+    }
+
     fn deep_hash_list(
         &self,
         data_len: usize,
@@ -178,7 +185,7 @@ impl Methods for Provider {
         Ok(hash)
     }
 
-    fn deep_hash_tags(&self, tags: Vec<Tag>) -> Result<[u8; 48], Error> {
+    fn deep_hash_tags(&self, tags: &Vec<Tag>) -> Result<[u8; 48], Error> {
         let list_tag = format!("list{}", tags.len());
         let mut hash = self.hash_SHA384(list_tag.as_bytes())?;
 
@@ -189,21 +196,50 @@ impl Methods for Provider {
         Ok(hash)
     }
 
-    fn concat_u8_48(&self, left: [u8; 48], right: [u8; 48]) -> Result<[u8; 96], Error> {
-        let mut iter = left.into_iter().chain(right);
-        let result = [(); 96].map(|_| iter.next().unwrap());
-        Ok(result)
+    /// Calculates deep hash of the required fields.
+    ///
+    /// Completes the calculation of the root hash to be signed in three steps. First is to calculate the hash for all of
+    /// the items up to the tags. Then the hash is calculated for the tags separately and concatenated with the hash
+    /// from the first part of the list. This is then used as the starting point to calculate the final hash from
+    /// the final two items in the list.
+    fn deep_hash(&self, transaction: &Transaction) -> Result<[u8; 48], Error> {
+        // Calculate hash for first part of list.
+        let pre_tag_hash = self.deep_hash_list(
+            9,
+            vec![
+                &transaction.format.to_string().as_bytes(),
+                &transaction.owner.0,
+                &transaction.target.0,
+                &transaction.quantity.to_string().as_bytes(),
+                &transaction.reward.to_string().as_bytes(),
+                &transaction.last_tx.0,
+            ],
+            None,
+        )?;
+
+        // Calculate deep hash for tags and concat with has from first part of list.
+        let tag_hash = self.deep_hash_tags(&transaction.tags)?;
+        let post_tag_hash = self.hash_SHA384(&self.concat_u8_48(pre_tag_hash, tag_hash)?)?;
+
+        // Calculate hash for last part of list starting with hash of first part of list and tags.
+        let final_hash = self.deep_hash_list(
+            0,
+            vec![
+                &transaction.data_size.to_string().as_bytes(),
+                &transaction.data_root.0,
+            ],
+            Some(post_tag_hash),
+        )?;
+
+        Ok(final_hash)
     }
 }
-
-// Do one test without all of the default values specified and one with everything
-// specified.
 
 #[cfg(test)]
 mod tests {
     use crate::{
         crypto::Methods as CryptoMethods,
-        transaction::{Base64, ConvertUtf8, Tag},
+        transaction::{Base64, FromStrs, Tag},
         Arweave, Error, Methods as ArewaveMethods,
     };
     use std::str::FromStr;
@@ -212,71 +248,38 @@ mod tests {
     async fn test_deep_hash() -> Result<(), Error> {
         let arweave = Arweave::from_keypair_path(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
+            None,
         )
         .await?;
 
         let file_paths = ["0.png", "1mb.bin"];
         let hashes: [[u8; 48]; 2] = [
             [
-                247, 203, 170, 29, 75, 110, 63, 222, 164, 171, 56, 33, 222, 227, 81, 22, 101, 250,
-                103, 139, 83, 102, 39, 10, 253, 84, 189, 84, 155, 223, 91, 0, 179, 47, 152, 105,
-                206, 78, 57, 73, 254, 1, 235, 80, 139, 125, 180, 122,
+                250, 147, 146, 233, 232, 245, 14, 213, 182, 94, 254, 251, 28, 124, 128, 225, 51, 7,
+                112, 16, 20, 209, 224, 26, 55, 78, 27, 4, 50, 223, 158, 240, 5, 64, 127, 126, 81,
+                156, 153, 245, 207, 219, 8, 108, 158, 120, 212, 214,
             ],
             [
-                93, 159, 217, 53, 116, 202, 121, 98, 75, 149, 24, 99, 56, 77, 154, 34, 195, 141,
-                56, 137, 228, 254, 88, 98, 162, 101, 10, 122, 114, 72, 106, 150, 98, 173, 7, 103,
-                31, 99, 156, 206, 75, 0, 215, 65, 97, 58, 158, 186,
+                196, 4, 241, 167, 159, 14, 68, 184, 220, 208, 48, 238, 148, 76, 125, 68, 62, 84,
+                192, 99, 165, 188, 36, 73, 249, 200, 16, 52, 193, 249, 190, 60, 85, 148, 252, 195,
+                118, 197, 52, 74, 173, 30, 58, 63, 46, 11, 56, 135,
             ],
         ];
 
         for (file_path, correct_hash) in file_paths.iter().zip(hashes) {
-            let mut transaction = arweave
-                .create_transaction_from_file_path(&format!("tests/fixtures/{}", file_path))
+            let last_tx = Base64::from_str("LCwsLCwsLA")?;
+            let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
+            let transaction = arweave
+                .create_transaction_from_file_path(
+                    &format!("tests/fixtures/{}", file_path),
+                    Some(other_tags),
+                    Some(last_tx),
+                    Some(0),
+                )
                 .await?;
 
-            transaction.last_tx = Base64::from_str("LCwsLCwsLA")?;
-
-            transaction.tags = vec![
-                Tag {
-                    name: Base64::from_utf8_str("Content-Type")?,
-                    value: Base64::from_utf8_str("text/html")?,
-                },
-                Tag {
-                    name: Base64::from_utf8_str("key2")?,
-                    value: Base64::from_utf8_str("value2")?,
-                },
-            ];
-
-            transaction.target = arweave.crypto.wallet_address()?;
-
-            transaction.reward = 42;
-
-            let pre_tag_hash = arweave.crypto.deep_hash_list(
-                9,
-                vec![
-                    &transaction.format.to_string().as_bytes(),
-                    &transaction.owner.0,
-                    &transaction.target.0,
-                    &transaction.quantity.to_string().as_bytes(),
-                    &transaction.reward.to_string().as_bytes(),
-                    &transaction.last_tx.0,
-                ],
-                None,
-            )?;
-
-            let tag_hash = arweave.crypto.deep_hash_tags(transaction.tags)?;
-            let post_tag_hash = arweave
-                .crypto
-                .hash_SHA384(&arweave.crypto.concat_u8_48(pre_tag_hash, tag_hash)?)?;
-            let hash = arweave.crypto.deep_hash_list(
-                0,
-                vec![
-                    &transaction.data_size.to_string().as_bytes(),
-                    &transaction.data_root.0,
-                ],
-                Some(post_tag_hash),
-            )?;
-            assert_eq!(hash, correct_hash);
+            let deep_hash = arweave.crypto.deep_hash(&transaction)?;
+            assert_eq!(deep_hash, correct_hash);
         }
         Ok(())
     }

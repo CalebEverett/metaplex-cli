@@ -26,6 +26,10 @@ jobs:
           # solana-install info
           # solana-keygen new --no-bip39-passphrase
           # solana-test-validator --quiet &
+          git clone https://github.com/textury/arlocal.git
+          cd arlocal
+          npx arlocal
+          cd ..
           cargo build
           cargo test
           

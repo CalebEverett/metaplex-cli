@@ -61,7 +61,7 @@ use crate::config::Config;
 pub mod output;
 use output::{println_display, CliMetadata, CliMint, CliTokenAmount, UiMetadata};
 
-use arweave_rs::{Arweave, Methods as ArweaveMethods};
+use arweave_rs::{transaction::Base64, Arweave, Methods as ArweaveMethods};
 
 type Error = Box<dyn std::error::Error>;
 type CommandResult = Result<Option<(u64, Vec<Vec<Instruction>>)>, Error>;
@@ -694,11 +694,21 @@ fn get_app() -> App<'static, 'static> {
                     SubCommand::with_name("upload-file")
                         .about("Uploads a file.")
                         .arg(
-                            Arg::with_name("filepath")
-                                .value_name("FILEPATH")
+                            Arg::with_name("file_path")
+                                .value_name("FILE_PATH")
                                 .takes_value(true)
                                 .required(true)
                                 .help("Specify path of file to be uploaded."),
+                        ),
+                )
+                .subcommand(
+                    SubCommand::with_name("status")
+                        .about("Check transaction status.")
+                        .arg(
+                            Arg::with_name("id")
+                                .value_name("ID")
+                                .takes_value(true)
+                                .help("Id of transaction to check status on."),
                         ),
                 ),
         );
@@ -870,27 +880,33 @@ async fn main() {
         ("arweave", Some(arg_matches)) => {
             let keypair_path = arg_matches.value_of("keypair_path").unwrap();
 
-            let provider = Arweave::from_keypair_path(keypair_path).await.unwrap();
+            let arweave = Arweave::from_keypair_path(keypair_path, None)
+                .await
+                .unwrap();
             let (sub_sub_command, sub_arg_matches) = arg_matches.subcommand();
 
             match (sub_sub_command, sub_arg_matches) {
                 ("price", Some(sub_sub_arg_matches)) => {
                     let bytes = value_t!(sub_sub_arg_matches, "bytes", usize).unwrap();
-                    command_price(&provider, &bytes, &config).await
+                    command_price(&arweave, &bytes, &config).await
                 }
                 ("get-transaction", Some(sub_sub_arg_matches)) => {
                     let id = sub_sub_arg_matches.value_of("id").unwrap();
-                    command_get_transaction(&provider, id).await
+                    command_get_transaction(&arweave, id).await
                 }
                 ("wallet-balance", Some(sub_sub_arg_matches)) => {
                     let wallet_address = sub_sub_arg_matches
                         .value_of("wallet_address")
                         .map(|v| v.to_string());
-                    command_wallet_balance(&provider, &config, wallet_address).await
+                    command_wallet_balance(&arweave, &config, wallet_address).await
                 }
                 ("upload-file", Some(sub_sub_arg_matches)) => {
-                    let filepath = sub_sub_arg_matches.value_of("filepath").unwrap();
-                    command_file_upload(&provider, filepath).await
+                    let file_path = sub_sub_arg_matches.value_of("file_path").unwrap();
+                    command_file_upload(&arweave, file_path).await
+                }
+                ("status", Some(sub_sub_arg_matches)) => {
+                    let id = sub_sub_arg_matches.value_of("id").unwrap();
+                    command_check_status(&arweave, id).await
                 }
                 _ => unreachable!(),
             }
@@ -1394,35 +1410,43 @@ fn command_mint(
     Ok(Some((0, vec![instructions])))
 }
 
-async fn command_price(provider: &Arweave, bytes: &usize, config: &Config) -> CommandResult {
-    let (winstons_per_kb, usd_per_ar) = provider.get_price(bytes).await?;
-    let usd_per_kb = (&winstons_per_kb * &usd_per_ar).to_f32().unwrap() / 1e14_f32;
+async fn command_price(arweave: &Arweave, bytes: &usize, config: &Config) -> CommandResult {
+    let (winstons_per_bytes, usd_per_ar) = arweave.get_price(bytes).await?;
+    let usd_per_kb = (&winstons_per_bytes * &usd_per_ar).to_f32().unwrap() / 1e14_f32;
 
     println_display(
         config,
         format!(
             "The price to upload {} bytes to {} is {} {} (${}).",
-            bytes, provider.name, winstons_per_kb, provider.units, usd_per_kb
+            bytes, arweave.name, winstons_per_bytes, arweave.units, usd_per_kb
         ),
     );
     Ok(None)
 }
 
-async fn command_get_transaction(provider: &Arweave, id: &str) -> CommandResult {
-    let transaction = provider.get_transaction(id).await?;
-    println!("Fetched transaction{}", transaction.id);
+async fn command_get_transaction(arweave: &Arweave, id: &str) -> CommandResult {
+    let id = Base64::from_str(id)?;
+    let transaction = arweave.get_transaction(&id).await?;
+    println!("Fetched transaction {}", transaction.id);
+    Ok(None)
+}
+
+async fn command_check_status(arweave: &Arweave, id: &str) -> CommandResult {
+    let id = Base64::from_str(id)?;
+    let status = arweave.check_status(&id).await?;
+    println!("Status for transaction id {}: {:?}", &id, &status);
     Ok(None)
 }
 
 async fn command_wallet_balance(
-    provider: &Arweave,
+    arweave: &Arweave,
     config: &Config,
     wallet_address: Option<String>,
 ) -> CommandResult {
     let mb = u32::pow(1024, 2) as usize;
     let result = tokio::join!(
-        provider.get_wallet_balance(wallet_address),
-        provider.get_price(&mb)
+        arweave.get_wallet_balance(wallet_address),
+        arweave.get_price(&mb)
     );
     let balance = result.0?;
     let (winstons_per_kb, usd_per_ar) = result.1?;
@@ -1436,7 +1460,7 @@ async fn command_wallet_balance(
         format!(
             "Wallet balance is {} {units} (${balance_usd}). At the current price of {price} {units} (${usd_price:.4}) per MB, you can upload {max} MB of data.",
             &balance,
-            units = provider.units,
+            units = arweave.units,
             max = &balance / &winstons_per_kb,
             price = &winstons_per_kb,
             balance_usd = balance_usd.to_f32().unwrap() / 100_f32,
@@ -1446,10 +1470,16 @@ async fn command_wallet_balance(
     Ok(None)
 }
 
-async fn command_file_upload(provider: &Arweave, filepath: &str) -> CommandResult {
-    // let transaction = provider.transaction_from_filepath(filepath).await?;
-    // provider.post_transaction(&transaction).await?;
-    println!("oneday this will upload ths file:  {}", filepath);
+async fn command_file_upload(arweave: &Arweave, file_path: &str) -> CommandResult {
+    let transaction = arweave
+        .create_transaction_from_file_path(file_path, None, None, None)
+        .await?;
+    let signed_transaction = arweave.sign_transaction(transaction)?;
+    arweave.post_transaction(&signed_transaction).await?;
+    println!(
+        "{} submitted for upload with transaction id {}. Check status to confirm the transaction was accepted.",
+        file_path, &signed_transaction.id
+    );
     Ok(None)
 }
 
