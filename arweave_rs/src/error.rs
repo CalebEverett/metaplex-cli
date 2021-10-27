@@ -5,4 +5,6 @@ pub enum ArweaveError {
     /// Invalid instruction
     #[error("Invalid Proof")]
     InvalidProof,
+    #[error("Tags could not be parsed to slices.")]
+    InvalidTags,
 }
