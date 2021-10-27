@@ -168,7 +168,7 @@ Creators: 2
 
 ## Upload Files to Arweave
 
-### Get and Arweave Wallet
+### Get an Arweave Wallet
 The first thing you have to do is get some AR tokens, but efore you actually get tokens, you'll need a wallet to transfer them into. You can get a wallet directly from Arweave [here](https://faucet.arweave.net/). You will download a json file and this command line tool is set up to read from that file. You can save it whereever you like and then either provide the location as an argument to the commands `--keypair-path` or better yet, add the path to an environment variable named `ARWEAVE_KEYPAIR_PATH`.
 
 ### Purchase AR Tokens
