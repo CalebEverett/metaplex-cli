@@ -11,9 +11,6 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
-        with:
-          node-version: '14'    
       - run: |
           rustup install nightly
           cargo --version
@@ -29,10 +26,10 @@ jobs:
           # solana-install info
           # solana-keygen new --no-bip39-passphrase
           # solana-test-validator --quiet &
-          git clone https://github.com/textury/arlocal.git
-          cd arlocal
-          npx arlocal
-          cd ..
+          # git clone https://github.com/textury/arlocal.git
+          # cd arlocal
+          # npx arlocal
+          # cd ..
           cargo build
           cargo test
           
