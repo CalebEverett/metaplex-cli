@@ -1,13 +1,13 @@
 
 # arweave_rs
 
-This is crate includes functionality to uploading files to the [Arweave](https://www.arweave.org/) permaweb from the command line.
+This crate includes functionality to upload files to the [Arweave](https://www.arweave.org/) permaweb from the command line.
 
 
 ## Upload Files to Arweave
 
 ### Get and Arweave Wallet
-The first thing you have to do is get some AR tokens, but efore you actually get tokens, you'll need a wallet to transfer them into. You can get a wallet directly from Arweave [here](https://faucet.arweave.net/). You will download a json file and this command line tool is set up to read from that file. You can save it whereever you like and then either provide the location as an argument to the commands `--keypair-path` or better yet, add the path to an environment variable named `ARWEAVE_KEYPAIR_PATH`.
+The first thing you have to do is get some AR tokens, but before you actually get tokens, you'll need a wallet to transfer them into. You can get a wallet directly from Arweave [here](https://faucet.arweave.net/). You will download a json file and the application is set up to read from that file. You can save it whereever you like and then either provide the location as an argument to the commands `--keypair-path` or better yet, add the path to an environment variable named `ARWEAVE_KEYPAIR_PATH`.
 
 ### Purchase AR Tokens
 Tokens can be purchased at either [gate.io](https://www.gate.io/) or [huobi.com](https://www.huobi.com/en-us/), or you can swap for them in [this Uniswap pool](https://info.uniswap.org/#/pools/0x3afec5673a547861877f4d722a594171595e561b). You likely won't need very many tokens since the cost of storage is relatively cheap. You can check to see how much storage costs in both Arweave tokens (AR) and USD by running the command below, which will give the cost of uploading 1 megabyte.
