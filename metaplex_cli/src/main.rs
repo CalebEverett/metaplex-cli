@@ -1472,7 +1472,7 @@ async fn command_wallet_balance(
 
 async fn command_file_upload(arweave: &Arweave, file_path: &str) -> CommandResult {
     let transaction = arweave
-        .create_transaction_from_file_path(PathBuf::from(file_path), None, None, None)
+        .create_transaction_from_file_path(&PathBuf::from(file_path), None, None, None)
         .await?;
     let signed_transaction = arweave.sign_transaction(transaction)?;
     arweave.post_transaction(&signed_transaction, None).await?;
