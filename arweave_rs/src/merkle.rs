@@ -3,6 +3,7 @@ use crate::{
     error::ArweaveError,
 };
 use borsh::BorshDeserialize;
+use std::path::PathBuf;
 type Error = Box<dyn std::error::Error>;
 
 /// Single struct used for chunks and nodes.
@@ -277,9 +278,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_leaves() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/1mb.bin").await?;
 
@@ -308,9 +309,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_hash_branch() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/1mb.bin").await?;
 
@@ -342,9 +343,9 @@ mod tests {
     }
     #[tokio::test]
     async fn test_build_layer() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/1mb.bin").await?;
 
@@ -366,9 +367,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_data_root() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/1mb.bin").await?;
 
@@ -388,9 +389,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_data_root_one_chunk() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/0.png").await?;
 
@@ -410,9 +411,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_proofs() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/1mb.bin").await?;
 
@@ -507,9 +508,9 @@ mod tests {
     }
     #[tokio::test]
     async fn test_validate_chunks() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/1mb.bin").await?;
 

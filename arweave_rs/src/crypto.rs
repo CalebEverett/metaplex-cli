@@ -6,6 +6,7 @@ use ring::{
     rand,
     signature::{self, KeyPair, RsaKeyPair},
 };
+use std::path::PathBuf;
 use tokio::{fs::File, io::AsyncReadExt};
 
 type Error = Box<dyn std::error::Error>;
@@ -17,7 +18,7 @@ pub struct Provider {
 
 #[async_trait]
 pub trait Methods {
-    async fn from_keypair_path(keypair_path: &str) -> Result<Provider, Error>;
+    async fn from_keypair_path(keypair_path: PathBuf) -> Result<Provider, Error>;
     fn keypair_modulus(&self) -> Result<Base64, Error>;
     fn wallet_address(&self) -> Result<Base64, Error>;
     fn sign(&self, message: &[u8]) -> Result<Vec<u8>, Error>;
@@ -45,7 +46,7 @@ pub trait Methods {
 
 #[async_trait]
 impl Methods for Provider {
-    async fn from_keypair_path(keypair_path: &str) -> Result<Provider, Error> {
+    async fn from_keypair_path(keypair_path: PathBuf) -> Result<Provider, Error> {
         debug!("{:?}", keypair_path);
         let mut file = File::open(keypair_path).await?;
         let mut jwk_str = String::new();
@@ -235,32 +236,22 @@ impl Methods for Provider {
         Ok(final_hash)
     }
 
-    // Same approach as arweave-js.
     fn deep_hash_alt(&self, deep_hash_item: DeepHashItem) -> Result<[u8; 48], Error> {
-        Ok(match deep_hash_item {
-            DeepHashItem {
-                blob: Some(blob),
-                list: None,
-            } => {
-                let blob_tag = format!("blob{}", blob.len());
-                self.hash_all_SHA384(vec![blob_tag.as_bytes(), &blob])?
-            }
-            DeepHashItem {
-                blob: None,
-                list: Some(list),
-            } => {
-                let list_tag = format!("list{}", list.len());
-                let mut list_tag_hash = self.hash_SHA384(list_tag.as_bytes())?;
+        let hash = if let Some(blob) = deep_hash_item.blob {
+            let blob_tag = format!("blob{}", blob.len());
+            self.hash_all_SHA384(vec![blob_tag.as_bytes(), &blob])?
+        } else {
+            let list = deep_hash_item.list.unwrap();
+            let list_tag = format!("list{}", list.len());
+            let mut hash = self.hash_SHA384(list_tag.as_bytes())?;
 
-                for child in list.into_iter() {
-                    let list_hash = self.deep_hash_alt(child)?;
-                    list_tag_hash =
-                        self.hash_SHA384(&self.concat_u8_48(list_tag_hash, list_hash)?)?;
-                }
-                list_tag_hash
+            for deep_hash_item in list.into_iter() {
+                let list_hash = self.deep_hash_alt(deep_hash_item)?;
+                hash = self.hash_SHA384(&self.concat_u8_48(hash, list_hash)?)?;
             }
-            _ => unreachable!(),
-        })
+            hash
+        };
+        Ok(hash)
     }
 }
 
@@ -271,18 +262,19 @@ mod tests {
         transaction::{Base64, FromStrs, Tag, ToItems},
         Arweave, Error, Methods as ArewaveMethods,
     };
-    use std::str::FromStr;
-    use std::time::Instant;
+    use std::{path::PathBuf, str::FromStr, time::Instant};
 
     #[tokio::test]
     async fn test_deep_hash() -> Result<(), Error> {
         let arweave = Arweave::from_keypair_path(
-            "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
+            PathBuf::from(
+                "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
+            ),
             None,
         )
         .await?;
 
-        let file_paths = ["0.png", "1mb.bin"];
+        let file_stems = ["0.png", "1mb.bin"];
         let hashes: [[u8; 48]; 2] = [
             [
                 250, 147, 146, 233, 232, 245, 14, 213, 182, 94, 254, 251, 28, 124, 128, 225, 51, 7,
@@ -296,12 +288,12 @@ mod tests {
             ],
         ];
 
-        for (file_path, correct_hash) in file_paths.iter().zip(hashes) {
+        for (file_stem, correct_hash) in file_stems.iter().zip(hashes) {
             let last_tx = Base64::from_str("LCwsLCwsLA")?;
             let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
             let transaction = arweave
                 .create_transaction_from_file_path(
-                    &format!("tests/fixtures/{}", file_path),
+                    PathBuf::from("tests/fixtures/").join(file_stem),
                     Some(other_tags),
                     Some(last_tx),
                     Some(0),
@@ -316,12 +308,14 @@ mod tests {
     #[tokio::test]
     async fn test_deep_hash_alt() -> Result<(), Error> {
         let arweave = Arweave::from_keypair_path(
-            "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
+            PathBuf::from(
+                "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
+            ),
             None,
         )
         .await?;
 
-        let file_paths = ["0.png", "1mb.bin"];
+        let file_stems = ["0.png", "1mb.bin"];
         let hashes: [[u8; 48]; 2] = [
             [
                 250, 147, 146, 233, 232, 245, 14, 213, 182, 94, 254, 251, 28, 124, 128, 225, 51, 7,
@@ -335,12 +329,12 @@ mod tests {
             ],
         ];
 
-        for (file_path, correct_hash) in file_paths.iter().zip(hashes) {
+        for (file_stem, correct_hash) in file_stems.iter().zip(hashes) {
             let last_tx = Base64::from_str("LCwsLCwsLA")?;
             let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
             let transaction = arweave
                 .create_transaction_from_file_path(
-                    &format!("tests/fixtures/{}", file_path),
+                    PathBuf::from("tests/fixtures/").join(file_stem),
                     Some(other_tags),
                     Some(last_tx),
                     Some(0),
@@ -359,22 +353,19 @@ mod tests {
     #[tokio::test]
     async fn test_deep_hash_timing() -> Result<(), Error> {
         let arweave = Arweave::from_keypair_path(
-            "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
+            PathBuf::from(
+                "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
+            ),
             None,
         )
         .await?;
 
-        let file_path = "0.png";
+        let file_path = PathBuf::from("tests/fixtures/0.png");
 
         let last_tx = Base64::from_str("LCwsLCwsLA")?;
         let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
         let transaction = arweave
-            .create_transaction_from_file_path(
-                &format!("tests/fixtures/{}", file_path),
-                Some(other_tags),
-                Some(last_tx),
-                Some(0),
-            )
+            .create_transaction_from_file_path(file_path, Some(other_tags), Some(last_tx), Some(0))
             .await?;
 
         let start = Instant::now();

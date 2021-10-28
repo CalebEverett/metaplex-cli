@@ -7,7 +7,11 @@ use reqwest::{
     header::{ACCEPT, CONTENT_TYPE},
 };
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
+use std::{
+    path::PathBuf,
+    str::FromStr,
+    time::{Duration, SystemTime},
+};
 use tokio::{fs::File, io::AsyncReadExt};
 use url::Url;
 
@@ -30,11 +34,29 @@ pub struct Arweave {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, Debug)]
-pub struct Status {
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RawStatus {
     block_height: u64,
-    block_indep_hash: String,
+    block_indep_hash: Base64,
     number_of_confirmations: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum StatusCode {
+    Submitted,
+    NotFound,
+    Pending,
+    Confirmed,
+}
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Status {
+    path: PathBuf,
+    id: Base64,
+    created_at: Duration,
+    last_modified: Duration,
+    status: StatusCode,
+    #[serde(flatten)]
+    raw_status: RawStatus,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -49,26 +71,30 @@ struct OraclePricePair {
 
 #[async_trait]
 pub trait Methods<T> {
-    async fn from_keypair_path(keypair_path: &str, base_url: Option<&str>) -> Result<T, Error>;
+    async fn from_keypair_path(keypair_path: PathBuf, base_url: Option<&str>) -> Result<T, Error>;
     async fn get_wallet_balance(&self, wallet_address: Option<String>) -> Result<BigUint, Error>;
     async fn get_price(&self, bytes: &usize) -> Result<(BigUint, BigUint), Error>;
     async fn get_transaction(&self, id: &Base64) -> Result<Transaction, Error>;
     async fn create_transaction_from_file_path(
         &self,
-        file_path: &str,
+        file_path: PathBuf,
         other_tags: Option<Vec<Tag>>,
         last_tx: Option<Base64>,
         reward: Option<u64>,
     ) -> Result<Transaction, Error>;
     fn sign_transaction(&self, transaction: Transaction) -> Result<Transaction, Error>;
-    async fn post_transaction(&self, transaction: &Transaction) -> Result<(), Error>;
+    async fn post_transaction(
+        &self,
+        transaction: &Transaction,
+        manifest_dir: Option<PathBuf>,
+    ) -> Result<(), Error>;
     async fn check_status(&self, id: &Base64) -> Result<Status, Error>;
 }
 
 #[async_trait]
 impl Methods<Arweave> for Arweave {
     async fn from_keypair_path(
-        keypair_path: &str,
+        keypair_path: PathBuf,
         base_url: Option<&str>,
     ) -> Result<Arweave, Error> {
         Ok(Arweave {
@@ -120,7 +146,7 @@ impl Methods<Arweave> for Arweave {
 
     async fn create_transaction_from_file_path(
         &self,
-        file_path: &str,
+        file_path: PathBuf,
         other_tags: Option<Vec<Tag>>,
         last_tx: Option<Base64>,
         reward: Option<u64>,
@@ -191,7 +217,11 @@ impl Methods<Arweave> for Arweave {
         Ok(transaction)
     }
 
-    async fn post_transaction(&self, transaction: &Transaction) -> Result<(), Error> {
+    async fn post_transaction(
+        &self,
+        transaction: &Transaction,
+        manifest_dir: Option<PathBuf>,
+    ) -> Result<(), Error> {
         let url = self.base_url.join("tx/")?;
         let client = reqwest::Client::new();
         let resp = client
@@ -213,7 +243,9 @@ impl Methods<Arweave> for Arweave {
 
     async fn check_status(&self, id: &Base64) -> Result<Status, Error> {
         let url = self.base_url.join(&format!("tx/{}/status", id))?;
-        let resp = reqwest::get(url).await?.json::<Status>().await?;
+        let resp = reqwest::get(url).await?;
+        println!("{:?}", resp);
+        let resp = resp.json::<Status>().await?;
         Ok(resp)
     }
 }
