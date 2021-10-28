@@ -17,7 +17,7 @@ async fn test_post_transaction() -> Result<(), Error> {
     let file_path = "tests/fixtures/0.png";
     let last_tx = Base64::from_str("LCwsLCwsLA")?;
     let transaction = arweave
-        .create_transaction_from_file_path(PathBuf::from(file_path), None, None, None)
+        .create_transaction_from_file_path(&PathBuf::from(file_path), None, None, None)
         .await?;
 
     let signed_transaction = arweave.sign_transaction(transaction)?;

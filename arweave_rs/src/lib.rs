@@ -1,3 +1,5 @@
+#![feature(derive_default_enum)]
+
 use async_trait::async_trait;
 use infer;
 use log::debug;
@@ -12,7 +14,7 @@ use std::{
     str::FromStr,
     time::{Duration, SystemTime},
 };
-use tokio::{fs::File, io::AsyncReadExt};
+use tokio::fs;
 use url::Url;
 
 pub mod crypto;
@@ -34,29 +36,48 @@ pub struct Arweave {
 }
 
 #[allow(dead_code)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct RawStatus {
     block_height: u64,
     block_indep_hash: Base64,
     number_of_confirmations: u64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq)]
 pub enum StatusCode {
+    #[default]
     Submitted,
     NotFound,
     Pending,
     Confirmed,
 }
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct Status {
-    path: PathBuf,
     id: Base64,
+    status: StatusCode,
+    file_path: Option<PathBuf>,
     created_at: Duration,
     last_modified: Duration,
-    status: StatusCode,
+    reward: u64,
     #[serde(flatten)]
-    raw_status: RawStatus,
+    raw_status: Option<RawStatus>,
+}
+
+impl Default for Status {
+    fn default() -> Self {
+        let created_at = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap();
+        Self {
+            id: Base64(vec![]),
+            status: StatusCode::default(),
+            file_path: None,
+            created_at,
+            last_modified: created_at,
+            reward: 0,
+            raw_status: None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -77,7 +98,7 @@ pub trait Methods<T> {
     async fn get_transaction(&self, id: &Base64) -> Result<Transaction, Error>;
     async fn create_transaction_from_file_path(
         &self,
-        file_path: PathBuf,
+        file_path: &PathBuf,
         other_tags: Option<Vec<Tag>>,
         last_tx: Option<Base64>,
         reward: Option<u64>,
@@ -85,10 +106,12 @@ pub trait Methods<T> {
     fn sign_transaction(&self, transaction: Transaction) -> Result<Transaction, Error>;
     async fn post_transaction(
         &self,
-        transaction: &Transaction,
-        manifest_dir: Option<PathBuf>,
-    ) -> Result<(), Error>;
+        signed_transaction: &Transaction,
+        file_path: Option<PathBuf>,
+    ) -> Result<Status, Error>;
     async fn check_status(&self, id: &Base64) -> Result<Status, Error>;
+    async fn write_status(&self, mut status: &Status, log_path: &PathBuf) -> Result<(), Error>;
+    async fn read_status(&self, id: &Base64, log_path: &PathBuf) -> Result<Status, Error>;
 }
 
 #[async_trait]
@@ -146,15 +169,12 @@ impl Methods<Arweave> for Arweave {
 
     async fn create_transaction_from_file_path(
         &self,
-        file_path: PathBuf,
+        file_path: &PathBuf,
         other_tags: Option<Vec<Tag>>,
         last_tx: Option<Base64>,
         reward: Option<u64>,
     ) -> Result<Transaction, Error> {
-        let mut file = File::open(file_path).await?;
-        let mut data = Vec::new();
-        file.read_to_end(&mut data).await?;
-
+        let data = fs::read(file_path).await?;
         let chunks = generate_leaves(data.clone(), &self.crypto)?;
         let root = generate_data_root(chunks.clone(), &self.crypto)?;
         let data_root = Base64(root.id.clone().into_iter().collect());
@@ -219,14 +239,18 @@ impl Methods<Arweave> for Arweave {
 
     async fn post_transaction(
         &self,
-        transaction: &Transaction,
-        manifest_dir: Option<PathBuf>,
-    ) -> Result<(), Error> {
+        signed_transaction: &Transaction,
+        file_path: Option<PathBuf>,
+    ) -> Result<Status, Error> {
+        if signed_transaction.id.0.is_empty() {
+            return Err(error::ArweaveError::UnsignedTransaction.into());
+        }
+
         let url = self.base_url.join("tx/")?;
         let client = reqwest::Client::new();
         let resp = client
             .post(url)
-            .json(&transaction)
+            .json(&signed_transaction)
             .header(&ACCEPT, "application/json")
             .header(&CONTENT_TYPE, "application/json")
             .send()
@@ -236,9 +260,17 @@ impl Methods<Arweave> for Arweave {
         println!(
             "Posted transaction: {}{}",
             self.base_url.to_string(),
-            transaction.id
+            signed_transaction.id
         );
-        Ok(())
+
+        let status = Status {
+            id: signed_transaction.id.clone(),
+            reward: signed_transaction.reward,
+            file_path,
+            ..Default::default()
+        };
+
+        Ok(status)
     }
 
     async fn check_status(&self, id: &Base64) -> Result<Status, Error> {
@@ -247,5 +279,102 @@ impl Methods<Arweave> for Arweave {
         println!("{:?}", resp);
         let resp = resp.json::<Status>().await?;
         Ok(resp)
+    }
+
+    async fn write_status(&self, status: &Status, log_path: &PathBuf) -> Result<(), Error> {
+        if status.id.0.is_empty() {
+            return Err(error::ArweaveError::UnsignedTransaction.into());
+        }
+        fs::write(
+            log_path.join(status.id.to_string()).with_extension("json"),
+            serde_json::to_string(&status)?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn read_status(&self, id: &Base64, log_path: &PathBuf) -> Result<Status, Error> {
+        let data = fs::read_to_string(log_path.join(id.to_string()).with_extension("json")).await?;
+        let status: Status = serde_json::from_str(&data)?;
+        Ok(status)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        error::ArweaveError,
+        transaction::{Base64, FromStrs, Tag},
+        Arweave, Methods as ArewaveMethods, Status,
+    };
+    use std::{path::PathBuf, str::FromStr};
+    pub type Error = Box<dyn std::error::Error>;
+
+    #[tokio::test]
+    async fn test_cannot_post_unsigned_transaction() -> Result<(), Error> {
+        let arweave = Arweave::from_keypair_path(
+            PathBuf::from(
+                "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
+            ),
+            None,
+        )
+        .await?;
+
+        let file_path = PathBuf::from("tests/fixtures/0.png");
+        let last_tx = Base64::from_str("LCwsLCwsLA")?;
+        let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
+        let transaction = arweave
+            .create_transaction_from_file_path(&file_path, Some(other_tags), Some(last_tx), Some(0))
+            .await?;
+
+        let error = arweave
+            .post_transaction(&transaction, None)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            &*error.downcast::<ArweaveError>()?,
+            &ArweaveError::UnsignedTransaction
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_create_write_read_status() -> Result<(), Error> {
+        let arweave = Arweave::from_keypair_path(
+            PathBuf::from(
+                "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
+            ),
+            None,
+        )
+        .await?;
+
+        let file_path = PathBuf::from("tests/fixtures/0.png");
+        let last_tx = Base64::from_str("LCwsLCwsLA")?;
+        let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
+        let transaction = arweave
+            .create_transaction_from_file_path(&file_path, Some(other_tags), Some(last_tx), Some(0))
+            .await?;
+
+        let signed_transaction = arweave.sign_transaction(transaction)?;
+
+        let status = Status {
+            id: signed_transaction.id.clone(),
+            reward: signed_transaction.reward,
+            file_path: Some(file_path),
+            ..Default::default()
+        };
+
+        let log_dir = PathBuf::from("../target/tmp");
+
+        arweave.write_status(&status, &log_dir).await?;
+
+        let read_status = arweave
+            .read_status(&signed_transaction.id, &log_dir)
+            .await?;
+
+        assert_eq!(status, read_status);
+
+        Ok(())
     }
 }

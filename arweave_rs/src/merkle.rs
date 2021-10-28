@@ -3,7 +3,6 @@ use crate::{
     error::ArweaveError,
 };
 use borsh::BorshDeserialize;
-use std::path::PathBuf;
 type Error = Box<dyn std::error::Error>;
 
 /// Single struct used for chunks and nodes.
@@ -265,6 +264,7 @@ pub fn validate_chunk(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use tokio::fs::File;
     use tokio::io::AsyncReadExt;
 

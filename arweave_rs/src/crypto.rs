@@ -7,8 +7,7 @@ use ring::{
     signature::{self, KeyPair, RsaKeyPair},
 };
 use std::path::PathBuf;
-use tokio::{fs::File, io::AsyncReadExt};
-
+use tokio::fs;
 type Error = Box<dyn std::error::Error>;
 use crate::transaction::{Base64, DeepHashItem, Tag, ToItems, Transaction};
 
@@ -48,10 +47,9 @@ pub trait Methods {
 impl Methods for Provider {
     async fn from_keypair_path(keypair_path: PathBuf) -> Result<Provider, Error> {
         debug!("{:?}", keypair_path);
-        let mut file = File::open(keypair_path).await?;
-        let mut jwk_str = String::new();
-        file.read_to_string(&mut jwk_str).await?;
-        let jwk_parsed: JsonWebKey = jwk_str.parse().unwrap();
+        let data = fs::read_to_string(keypair_path).await?;
+
+        let jwk_parsed: JsonWebKey = data.parse().unwrap();
         Ok(Self {
             keypair: signature::RsaKeyPair::from_pkcs8(&jwk_parsed.key.as_ref().to_der())?,
         })
@@ -70,12 +68,12 @@ impl Methods for Provider {
     /// # use arweave_rs::crypto::Methods as CryptoMethods;
     /// # use arweave_rs::{Arweave, Methods as ArweaveMethods};
     /// # use ring::{signature, rand};
-    /// # use std::fmt::Display;
+    /// # use std::{fmt::Display, path::PathBuf};
     /// #
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let arweave = Arweave::from_keypair_path("tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json", None).await?;
+    /// let arweave = Arweave::from_keypair_path(PathBuf::from("tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json"), None).await?;
     /// let calc = arweave.crypto.wallet_address()?;
     /// let actual = String::from("7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg");
     /// assert_eq!(&calc.to_string(), &actual);
@@ -101,10 +99,11 @@ impl Methods for Provider {
     ///```
     /// # use ring::{signature, rand};
     /// # use arweave_rs::crypto::{Provider, Methods};
+    /// # use std::path::PathBuf;
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let crypto = Provider::from_keypair_path("tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json").await?;
+    /// let crypto = Provider::from_keypair_path(PathBuf::from("tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json")).await?;
     /// let message = String::from("hello, world");
     /// let rng = rand::SystemRandom::new();
     /// let signature = crypto.sign(&message.as_bytes())?;
@@ -245,9 +244,9 @@ impl Methods for Provider {
             let list_tag = format!("list{}", list.len());
             let mut hash = self.hash_SHA384(list_tag.as_bytes())?;
 
-            for deep_hash_item in list.into_iter() {
-                let list_hash = self.deep_hash_alt(deep_hash_item)?;
-                hash = self.hash_SHA384(&self.concat_u8_48(hash, list_hash)?)?;
+            for child in list.into_iter() {
+                let child_hash = self.deep_hash_alt(child)?;
+                hash = self.hash_SHA384(&self.concat_u8_48(hash, child_hash)?)?;
             }
             hash
         };
@@ -293,7 +292,7 @@ mod tests {
             let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
             let transaction = arweave
                 .create_transaction_from_file_path(
-                    PathBuf::from("tests/fixtures/").join(file_stem),
+                    &PathBuf::from("tests/fixtures/").join(file_stem),
                     Some(other_tags),
                     Some(last_tx),
                     Some(0),
@@ -334,7 +333,7 @@ mod tests {
             let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
             let transaction = arweave
                 .create_transaction_from_file_path(
-                    PathBuf::from("tests/fixtures/").join(file_stem),
+                    &PathBuf::from("tests/fixtures/").join(file_stem),
                     Some(other_tags),
                     Some(last_tx),
                     Some(0),
@@ -359,13 +358,11 @@ mod tests {
             None,
         )
         .await?;
-
         let file_path = PathBuf::from("tests/fixtures/0.png");
-
         let last_tx = Base64::from_str("LCwsLCwsLA")?;
         let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
         let transaction = arweave
-            .create_transaction_from_file_path(file_path, Some(other_tags), Some(last_tx), Some(0))
+            .create_transaction_from_file_path(&file_path, Some(other_tags), Some(last_tx), Some(0))
             .await?;
 
         let start = Instant::now();

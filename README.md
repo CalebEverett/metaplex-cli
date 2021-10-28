@@ -216,6 +216,7 @@ where id is the id you got back when you uploaded the file. Keep in mind that Ar
 - [ ] Fractionalization
 - [ ] Custom Edition Metadata
 - [ ] Remote Wallet
+- [ ] Handle all errors explicitly with `thiserror` and get rid of `Box<dyn std::error::Error>`
 
 ## Implementation Details
 
