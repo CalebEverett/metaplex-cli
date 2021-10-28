@@ -243,7 +243,6 @@ impl Methods for Provider {
                 list: None,
             } => {
                 let blob_tag = format!("blob{}", blob.len());
-                println!("{}", blob_tag);
                 self.hash_all_SHA384(vec![blob_tag.as_bytes(), &blob])?
             }
             DeepHashItem {
@@ -251,7 +250,6 @@ impl Methods for Provider {
                 list: Some(list),
             } => {
                 let list_tag = format!("list{}", list.len());
-                println!("{}", list_tag);
                 let mut list_tag_hash = self.hash_SHA384(list_tag.as_bytes())?;
 
                 for child in list.into_iter() {
@@ -274,6 +272,7 @@ mod tests {
         Arweave, Error, Methods as ArewaveMethods,
     };
     use std::str::FromStr;
+    use std::time::Instant;
 
     #[tokio::test]
     async fn test_deep_hash() -> Result<(), Error> {
@@ -351,8 +350,49 @@ mod tests {
             let deep_hash = arweave
                 .crypto
                 .deep_hash_alt(transaction.to_deep_hash_item()?)?;
+
             assert_eq!(deep_hash, correct_hash);
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_deep_hash_timing() -> Result<(), Error> {
+        let arweave = Arweave::from_keypair_path(
+            "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
+            None,
+        )
+        .await?;
+
+        let file_path = "0.png";
+
+        let last_tx = Base64::from_str("LCwsLCwsLA")?;
+        let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
+        let transaction = arweave
+            .create_transaction_from_file_path(
+                &format!("tests/fixtures/{}", file_path),
+                Some(other_tags),
+                Some(last_tx),
+                Some(0),
+            )
+            .await?;
+
+        let start = Instant::now();
+        for _ in [..1].iter() {
+            let _ = arweave
+                .crypto
+                .deep_hash_alt(transaction.to_deep_hash_item()?)?;
+        }
+        println!("deep_hash_alt: {:?}", start.elapsed());
+
+        let start = Instant::now();
+        for _ in [..1].iter() {
+            let _ = arweave.crypto.deep_hash(&transaction)?;
+        }
+        println!("deep_hash: {:?}", start.elapsed());
+
+        // The non-recursive implementation is faster, but only marginally - < 50 ns
+        // assert!(false);
         Ok(())
     }
 }
