@@ -9,7 +9,7 @@ use ring::{
 use tokio::{fs::File, io::AsyncReadExt};
 
 type Error = Box<dyn std::error::Error>;
-use crate::transaction::{Base64, Tag, ToSlices, Transaction};
+use crate::transaction::{Base64, DeepHashItem, Tag, ToItems, Transaction};
 
 pub struct Provider {
     pub keypair: RsaKeyPair,
@@ -40,6 +40,7 @@ pub trait Methods {
     ) -> Result<[u8; 48], Error>;
     fn deep_hash_tags(&self, tags: &Vec<Tag>) -> Result<[u8; 48], Error>;
     fn deep_hash(&self, transaction: &Transaction) -> Result<[u8; 48], Error>;
+    fn deep_hash_alt(&self, deep_hash_item: DeepHashItem) -> Result<[u8; 48], Error>;
 }
 
 #[async_trait]
@@ -233,16 +234,45 @@ impl Methods for Provider {
 
         Ok(final_hash)
     }
+
+    // Same approach as arweave-js.
+    fn deep_hash_alt(&self, deep_hash_item: DeepHashItem) -> Result<[u8; 48], Error> {
+        Ok(match deep_hash_item {
+            DeepHashItem {
+                blob: Some(blob),
+                list: None,
+            } => {
+                let blob_tag = format!("blob{}", blob.len());
+                self.hash_all_SHA384(vec![blob_tag.as_bytes(), &blob])?
+            }
+            DeepHashItem {
+                blob: None,
+                list: Some(list),
+            } => {
+                let list_tag = format!("list{}", list.len());
+                let mut list_tag_hash = self.hash_SHA384(list_tag.as_bytes())?;
+
+                for child in list.into_iter() {
+                    let list_hash = self.deep_hash_alt(child)?;
+                    list_tag_hash =
+                        self.hash_SHA384(&self.concat_u8_48(list_tag_hash, list_hash)?)?;
+                }
+                list_tag_hash
+            }
+            _ => unreachable!(),
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
         crypto::Methods as CryptoMethods,
-        transaction::{Base64, FromStrs, Tag},
+        transaction::{Base64, FromStrs, Tag, ToItems},
         Arweave, Error, Methods as ArewaveMethods,
     };
     use std::str::FromStr;
+    use std::time::Instant;
 
     #[tokio::test]
     async fn test_deep_hash() -> Result<(), Error> {
@@ -281,6 +311,88 @@ mod tests {
             let deep_hash = arweave.crypto.deep_hash(&transaction)?;
             assert_eq!(deep_hash, correct_hash);
         }
+        Ok(())
+    }
+    #[tokio::test]
+    async fn test_deep_hash_alt() -> Result<(), Error> {
+        let arweave = Arweave::from_keypair_path(
+            "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
+            None,
+        )
+        .await?;
+
+        let file_paths = ["0.png", "1mb.bin"];
+        let hashes: [[u8; 48]; 2] = [
+            [
+                250, 147, 146, 233, 232, 245, 14, 213, 182, 94, 254, 251, 28, 124, 128, 225, 51, 7,
+                112, 16, 20, 209, 224, 26, 55, 78, 27, 4, 50, 223, 158, 240, 5, 64, 127, 126, 81,
+                156, 153, 245, 207, 219, 8, 108, 158, 120, 212, 214,
+            ],
+            [
+                196, 4, 241, 167, 159, 14, 68, 184, 220, 208, 48, 238, 148, 76, 125, 68, 62, 84,
+                192, 99, 165, 188, 36, 73, 249, 200, 16, 52, 193, 249, 190, 60, 85, 148, 252, 195,
+                118, 197, 52, 74, 173, 30, 58, 63, 46, 11, 56, 135,
+            ],
+        ];
+
+        for (file_path, correct_hash) in file_paths.iter().zip(hashes) {
+            let last_tx = Base64::from_str("LCwsLCwsLA")?;
+            let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
+            let transaction = arweave
+                .create_transaction_from_file_path(
+                    &format!("tests/fixtures/{}", file_path),
+                    Some(other_tags),
+                    Some(last_tx),
+                    Some(0),
+                )
+                .await?;
+
+            let deep_hash = arweave
+                .crypto
+                .deep_hash_alt(transaction.to_deep_hash_item()?)?;
+
+            assert_eq!(deep_hash, correct_hash);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_deep_hash_timing() -> Result<(), Error> {
+        let arweave = Arweave::from_keypair_path(
+            "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
+            None,
+        )
+        .await?;
+
+        let file_path = "0.png";
+
+        let last_tx = Base64::from_str("LCwsLCwsLA")?;
+        let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
+        let transaction = arweave
+            .create_transaction_from_file_path(
+                &format!("tests/fixtures/{}", file_path),
+                Some(other_tags),
+                Some(last_tx),
+                Some(0),
+            )
+            .await?;
+
+        let start = Instant::now();
+        for _ in [..1].iter() {
+            let _ = arweave
+                .crypto
+                .deep_hash_alt(transaction.to_deep_hash_item()?)?;
+        }
+        println!("deep_hash_alt: {:?}", start.elapsed());
+
+        let start = Instant::now();
+        for _ in [..1].iter() {
+            let _ = arweave.crypto.deep_hash(&transaction)?;
+        }
+        println!("deep_hash: {:?}", start.elapsed());
+
+        // The non-recursive implementation is faster, but only marginally - < 50 ns
+        // assert!(false);
         Ok(())
     }
 }

@@ -10,7 +10,7 @@ This crate includes functionality to upload files to the [Arweave](https://www.a
 The first thing you have to do is get some AR tokens, but before you actually get tokens, you'll need a wallet to transfer them into. You can get a wallet directly from Arweave [here](https://faucet.arweave.net/). You will download a json file and the application is set up to read from that file. You can save it whereever you like and then either provide the location as an argument to the commands `--keypair-path` or better yet, add the path to an environment variable named `ARWEAVE_KEYPAIR_PATH`.
 
 ### Purchase AR Tokens
-Tokens can be purchased at either [gate.io](https://www.gate.io/) or [huobi.com](https://www.huobi.com/en-us/), or you can swap for them in [this Uniswap pool](https://info.uniswap.org/#/pools/0x3afec5673a547861877f4d722a594171595e561b). You likely won't need very many tokens since the cost of storage is relatively cheap. You can check to see how much storage costs in both Arweave tokens (AR) and USD by running the command below, which will give the cost of uploading 1 megabyte.
+Tokens can be purchased at either [gate.io](https://www.gate.io/) or [huobi.com](https://www.huobi.com/en-us/), or you can swap for them in [this Uniswap pool](https://info.uniswap.org/#/pools/0x3afec5673a547861877f4d722a594171595e561b). You likely won't need very many tokens since the cost of storage is relatively cheap. You can check to see how much storage costs in both Arweave tokens (AR) and USD by running the command below, which will give the cost of uploading 1 megabyte. [Here](https://arweave.news/how-to-buy-arweave-token/) is an overview from Arweave on purchasing options from the U.S.
 
 ```
 cargo run arweave price 1000000
@@ -49,3 +49,14 @@ where id is the id you got back when you uploaded the file. Keep in mind that Ar
 ## Implementation Details
 
 Includes standalone functionality to calculate merkle roots for chunked transactions, resolve their proofs and validate chunks. The current api doesn't take advantage of the chunks api and instead is currently using the `/tx` endpoint. The work to create the chunks has been done and with only some minor additional testing, it will use the `/chunks` endpoint. The current application also doesn't do any concurrent processesing even though functions that would benefit from concurent processing have been developed as such. Although not critical for uploading relatively small batches of files for NFT projects, implementing chunking and concurrent processing will make the process of uploading files very fast.
+
+## Resources
+
+### Bundling
+
+* [Bundles Will Take Over Arweave: A Look At the Permaweb's First L2](https://arweave.news/bundles/)
+* [Bundlr Docs](https://docs.bundlr.network/network-overview)
+* [arbundles](https://github.com/Bundlr-Network/arbundles/tree/master/src)
+* [ANS-104](https://github.com/joshbenaron/arweave-standards/blob/ans104/ans/ANS-104.md)
+* [https://bundlr.arweave.net/](https://bundlr.arweave.net/)
+* [Bundlr discord channel](https://discord.com/channels/864852288002850866/865652381928259634)
