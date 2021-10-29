@@ -482,7 +482,7 @@ impl Methods<Arweave> for Arweave {
         Ok(statuses)
     }
 
-    /// Filters saved Status objects by status and confirmation.
+    /// Filters saved Status objects by status and number of confirmations.
     ///
     /// If there is no raw status object and min_confirms is passed, it
     /// assumes there are zero confirms. This is designed to be used to
