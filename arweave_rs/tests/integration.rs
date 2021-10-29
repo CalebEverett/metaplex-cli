@@ -5,7 +5,8 @@ use arweave_rs::{
 };
 use futures::future::try_join_all;
 use glob::glob;
-use std::{iter, path::PathBuf};
+use std::{iter, path::PathBuf, time::Duration};
+use tokio::time::sleep;
 
 async fn get_arweave() -> Result<Arweave, Error> {
     let keypair_path =
@@ -18,6 +19,8 @@ async fn get_arweave() -> Result<Arweave, Error> {
 async fn mine(arweave: &Arweave) -> Result<(), Error> {
     let url = arweave.base_url.join("mine")?;
     let resp = reqwest::get(url).await?.text().await?;
+    // Give the node server a chance
+    sleep(Duration::from_secs(1)).await;
     println!("mine resp: {}", resp);
     Ok(())
 }
@@ -213,12 +216,12 @@ async fn test_filter_statuses() -> Result<(), Error> {
         )
         .await?;
 
-    // Now update all of the statuses.
+    // Update statuses.
     let paths_iter = glob("tests/fixtures/[0-4]*.png")?.filter_map(Result::ok);
     let update_statuses = arweave.update_statuses(paths_iter, log_dir.clone()).await?;
 
-    assert_eq!(update_statuses.len(), 5);
     println!("{:?}", update_statuses);
+    assert_eq!(update_statuses.len(), 5);
 
     // There should be 5 StatusCode::Pending.
     let paths_iter = glob("tests/fixtures/[0-4].png")?.filter_map(Result::ok);
@@ -228,7 +231,7 @@ async fn test_filter_statuses() -> Result<(), Error> {
     assert_eq!(pending.len(), 5);
     println!("{:?}", pending);
 
-    // Then mine - these files should be Status.status = StatusCode::Confirmed.
+    // Then mine
     let _ = mine(&arweave).await?;
 
     // Now when we update statuses we should get five confirmed.
