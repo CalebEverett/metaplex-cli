@@ -235,7 +235,6 @@ pub fn validate_chunk(
 
                 // Ensure calculated id correct.
                 if !(id == root_id) {
-                    println!("id: {:?}, root_id: {:?}", id, root_id);
                     return Err(ArweaveError::InvalidProof.into());
                 }
 
@@ -250,7 +249,6 @@ pub fn validate_chunk(
             // Validate leaf: both id and data_hash are correct.
             let id = crypto.hash_all_SHA256(vec![&data_hash, &max_byte_range.to_note_vec()])?;
             if !(id == root_id) & !(data_hash == leaf_proof.data_hash) {
-                println!("id: {:?}, root_id: {:?}", id, root_id);
                 return Err(ArweaveError::InvalidProof.into());
             }
         }

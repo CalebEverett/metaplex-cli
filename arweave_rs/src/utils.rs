@@ -23,7 +23,6 @@ impl TempFrom<TempDir> for TempDir {
         let _ = rng.fill(&mut rand_bytes)?;
         let temp_stem = encode_config(rand_bytes, base64::URL_SAFE_NO_PAD);
         let path = PathBuf::from(path_str).join(temp_stem);
-        println!("{}", path.display());
         fs::create_dir(&path).await?;
         Ok(Self(path))
     }

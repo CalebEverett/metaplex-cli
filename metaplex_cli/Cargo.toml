@@ -12,7 +12,6 @@ arweave_rs = { path = "../arweave_rs" }
 borsh = "0.9.1"
 clap = "2.33.3"
 console = "0.15.0"
-env_logger = "0.9.0"
 infer = { version = "0.5.0", default-features = false }
 indicatif = "0.16.2"
 log = "0.4.14"

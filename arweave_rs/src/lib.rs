@@ -323,11 +323,6 @@ impl Methods<Arweave> for Arweave {
             .await?;
         debug!("post_transaction {:?}", &resp);
         assert_eq!(resp.status().as_u16(), 200);
-        println!(
-            "Posted transaction: {}{}",
-            self.base_url.to_string(),
-            signed_transaction.id
-        );
 
         let status = Status {
             id: signed_transaction.id.clone(),
@@ -404,7 +399,6 @@ impl Methods<Arweave> for Arweave {
         match resp.status() {
             ResponseStatusCode::OK => {
                 let resp_string = resp.text().await?;
-                println!("fu: {}", resp_string);
                 if &resp_string == &String::from("Pending") {
                     status.status = StatusCode::Pending;
                 } else {
