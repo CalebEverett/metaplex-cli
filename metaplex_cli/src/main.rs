@@ -61,7 +61,10 @@ use crate::config::Config;
 pub mod output;
 use output::{println_display, CliMetadata, CliMint, CliTokenAmount, UiMetadata};
 
-use arweave_rs::{transaction::Base64, Arweave, Methods as ArweaveMethods};
+use arweave_rs::{
+    transaction::{Base64, FromStrs, Tag},
+    Arweave, Methods as ArweaveMethods,
+};
 
 type Error = Box<dyn std::error::Error>;
 type CommandResult = Result<Option<(u64, Vec<Vec<Instruction>>)>, Error>;
@@ -145,6 +148,17 @@ where
     }
 }
 
+fn is_valid_tag<T>(tag: T) -> Result<(), String>
+where
+    T: AsRef<str> + Display,
+{
+    let split: Vec<_> = tag.as_ref().split(":").collect();
+    match Tag::from_utf8_strs(split[0], split[1]) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Not a valid tag.")),
+    }
+}
+
 // DATA HELPERS
 
 fn get_creators_vec(creator_values: Option<Values>) -> Option<Vec<Creator>> {
@@ -160,6 +174,22 @@ fn get_creators_vec(creator_values: Option<Values>) -> Option<Vec<Creator>> {
             creators.push(creator)
         });
         Some(creators)
+    } else {
+        None
+    }
+}
+
+fn get_tags_vec(tag_values: Option<Values>) -> Option<Vec<Tag>> {
+    if let Some(tag_strings) = tag_values {
+        let tags = tag_strings
+            .into_iter()
+            .map(|t| {
+                let split: Vec<&str> = t.split(":").collect();
+                Tag::from_utf8_strs(split[0], split[1])
+            })
+            .flat_map(Result::ok)
+            .collect();
+        Some(tags)
     } else {
         None
     }
@@ -646,6 +676,8 @@ fn get_app() -> App<'static, 'static> {
                     Arg::with_name("keypair_path")
                         .long("keypair-path")
                         .value_name("ARWEAVE_KEYPAIR_PATH")
+                        .takes_value(true)
+                        .validator(is_parsable::<PathBuf>)
                         .env("ARWEAVE_KEYPAIR_PATH")
                         .required(true)
                         .help(
@@ -673,6 +705,7 @@ fn get_app() -> App<'static, 'static> {
                             Arg::with_name("id")
                                 .value_name("ID")
                                 .takes_value(true)
+                                .validator(is_parsable::<Base64>)
                                 .help("Id of data to return from storage."),
                         ),
                 )
@@ -683,6 +716,7 @@ fn get_app() -> App<'static, 'static> {
                             Arg::with_name("wallet_address")
                                 .value_name("WALLET_ADDRESS")
                                 .takes_value(true)
+                                .validator(is_parsable::<Base64>)
                                 .help(
                                     "Specify wallet address for which to \
                             return balance. Defaults to address of keypair \
@@ -691,14 +725,41 @@ fn get_app() -> App<'static, 'static> {
                         ),
                 )
                 .subcommand(
-                    SubCommand::with_name("upload-file")
-                        .about("Uploads a file.")
+                    SubCommand::with_name("file-upload")
+                        .about("Uploads a single file.")
                         .arg(
                             Arg::with_name("file_path")
                                 .value_name("FILE_PATH")
                                 .takes_value(true)
                                 .required(true)
-                                .help("Specify path of file to be uploaded."),
+                                .validator(is_parsable::<PathBuf>)
+                                .help("Path of the file to be uploaded."),
+                        )
+                        .arg(
+                            Arg::with_name("log_dir")
+                                .long("log-dir")
+                                .value_name("LOG_DIR")
+                                .takes_value(true)
+                                .validator(is_parsable::<PathBuf>)
+                                .help(
+                                    "Directory to write status updates to. If not \
+                                provided, status updates will not be written.
+                                ",
+                                ),
+                        )
+                        .arg(
+                            Arg::with_name("tags")
+                                .long("tags")
+                                .value_name("TAGS")
+                                .multiple(true)
+                                .takes_value(true)
+                                .validator(is_valid_tag)
+                                .help(
+                                    "Specify additional tags for the file as \
+                                    <NAME>:<VALUE>, separated by spaces. Content-Type tag \
+                                    will be inferred automatically so not necessary so \
+                                    include here.",
+                                ),
                         ),
                 )
                 .subcommand(
@@ -900,9 +961,11 @@ async fn main() {
                         .map(|v| v.to_string());
                     command_wallet_balance(&arweave, &config, wallet_address).await
                 }
-                ("upload-file", Some(sub_sub_arg_matches)) => {
+                ("file-upload", Some(sub_sub_arg_matches)) => {
                     let file_path = sub_sub_arg_matches.value_of("file_path").unwrap();
-                    command_file_upload(&arweave, file_path).await
+                    let log_dir = sub_sub_arg_matches.value_of("log_dir");
+                    let tags = get_tags_vec(arg_matches.values_of("tags"));
+                    command_file_upload(&arweave, &config, file_path, log_dir, tags).await
                 }
                 ("status", Some(sub_sub_arg_matches)) => {
                     let id = sub_sub_arg_matches.value_of("id").unwrap();
@@ -1470,16 +1533,24 @@ async fn command_wallet_balance(
     Ok(None)
 }
 
-async fn command_file_upload(arweave: &Arweave, file_path: &str) -> CommandResult {
-    let transaction = arweave
-        .create_transaction_from_file_path(PathBuf::from(file_path), None, None, None)
+async fn command_file_upload(
+    arweave: &Arweave,
+    config: &Config,
+    file_path: &str,
+    log_dir: Option<&str>,
+    tags: Option<Vec<Tag>>,
+) -> CommandResult {
+    let status = arweave
+        .upload_file_from_path(
+            PathBuf::from(file_path),
+            log_dir.map(|v| PathBuf::from(v)),
+            tags,
+            None,
+            None,
+        )
         .await?;
-    let signed_transaction = arweave.sign_transaction(transaction)?;
-    arweave.post_transaction(&signed_transaction, None).await?;
-    println!(
-        "{} submitted for upload with transaction id {}. Check status to confirm the transaction was accepted.",
-        file_path, &signed_transaction.id
-    );
+
+    println_display(config, format!("{:?}", status));
     Ok(None)
 }
 
