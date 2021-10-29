@@ -55,8 +55,15 @@ Includes standalone functionality to calculate merkle roots for chunked transact
 ### Bundling
 
 * [Bundles Will Take Over Arweave: A Look At the Permaweb's First L2](https://arweave.news/bundles/)
+* [Bundles](https://arwiki.wiki/#/en/bundles)
 * [Bundlr Docs](https://docs.bundlr.network/network-overview)
 * [arbundles](https://github.com/Bundlr-Network/arbundles/tree/master/src)
 * [ANS-104](https://github.com/joshbenaron/arweave-standards/blob/ans104/ans/ANS-104.md)
 * [https://bundlr.arweave.net/](https://bundlr.arweave.net/)
 * [Bundlr discord channel](https://discord.com/channels/864852288002850866/865652381928259634)
+* [ardrive-cli](https://github.com/ardriveapp/ardrive-cli)
+* [IPFS and Friends: A Qualitative Comparison of Next Generation Peer-to-Peer Data Networks](https://arxiv.org/pdf/2102.12737.pdf)
+
+### Error Handling
+ * [anyhow](https://github.com/dtolnay/anyhow)
+ * [thiserror](https://docs.rs/thiserror/1.0.30/thiserror/)

@@ -3,7 +3,7 @@ use crate::{
     error::ArweaveError,
 };
 use borsh::BorshDeserialize;
-type Error = Box<dyn std::error::Error>;
+type Error = ArweaveError;
 
 /// Single struct used for chunks and nodes.
 #[derive(Debug, PartialEq, Clone)]
@@ -235,7 +235,6 @@ pub fn validate_chunk(
 
                 // Ensure calculated id correct.
                 if !(id == root_id) {
-                    println!("id: {:?}, root_id: {:?}", id, root_id);
                     return Err(ArweaveError::InvalidProof.into());
                 }
 
@@ -250,7 +249,6 @@ pub fn validate_chunk(
             // Validate leaf: both id and data_hash are correct.
             let id = crypto.hash_all_SHA256(vec![&data_hash, &max_byte_range.to_note_vec()])?;
             if !(id == root_id) & !(data_hash == leaf_proof.data_hash) {
-                println!("id: {:?}, root_id: {:?}", id, root_id);
                 return Err(ArweaveError::InvalidProof.into());
             }
         }
@@ -264,6 +262,7 @@ pub fn validate_chunk(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use tokio::fs::File;
     use tokio::io::AsyncReadExt;
 
@@ -277,9 +276,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_leaves() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/1mb.bin").await?;
 
@@ -308,9 +307,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_hash_branch() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/1mb.bin").await?;
 
@@ -342,9 +341,9 @@ mod tests {
     }
     #[tokio::test]
     async fn test_build_layer() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/1mb.bin").await?;
 
@@ -366,9 +365,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_data_root() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/1mb.bin").await?;
 
@@ -388,9 +387,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_data_root_one_chunk() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/0.png").await?;
 
@@ -410,9 +409,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_proofs() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/1mb.bin").await?;
 
@@ -507,9 +506,9 @@ mod tests {
     }
     #[tokio::test]
     async fn test_validate_chunks() -> Result<(), Error> {
-        let crypto = Provider::from_keypair_path(
+        let crypto = Provider::from_keypair_path(PathBuf::from(
             "tests/fixtures/arweave-key-7eV1qae4qVNqsNChg3Scdi-DpOLJPCogct4ixoq1WNg.json",
-        )
+        ))
         .await?;
         let mut file = File::open("tests/fixtures/1mb.bin").await?;
 

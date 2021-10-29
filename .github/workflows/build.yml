@@ -11,6 +11,11 @@ on:
 jobs:
   Build:
     runs-on: ubuntu-20.04
+    services:
+      arlocal:
+          image: calebeverett/arlocal
+          ports:
+            - 1984:1984
     steps:
       - uses: actions/checkout@v2
       - run: |
@@ -23,15 +28,11 @@ jobs:
           sudo apt-get install -y libssl-dev --allow-unauthenticated
           sudo apt-get install -y libssl1.1 --allow-unauthenticated
           sudo apt-get install -y libudev-dev --allow-unauthenticated
-          sh -c "$(curl -sSfL https://release.solana.com/v1.8.0/install)"
+          sh -c "$(curl -sSfL https://release.solana.com/v1.8.2/install)"
           export PATH=~/.local/share/solana/install/active_release/bin:$PATH
           solana-install info
           solana-keygen new --no-bip39-passphrase
           # solana-test-validator --quiet &
-          # git clone https://github.com/textury/arlocal.git
-          # cd arlocal
-          # npx arlocal
-          # cd ..
           cargo build
-          cargo test
+          cargo test -- --nocapture
           

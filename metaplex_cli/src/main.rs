@@ -53,7 +53,7 @@ use spl_token::{
     self,
     state::{Account, Mint},
 };
-use std::{fmt::Display, process::exit, str::FromStr, sync::Arc};
+use std::{fmt::Display, path::PathBuf, process::exit, str::FromStr, sync::Arc};
 
 pub mod config;
 use crate::config::Config;
@@ -880,7 +880,7 @@ async fn main() {
         ("arweave", Some(arg_matches)) => {
             let keypair_path = arg_matches.value_of("keypair_path").unwrap();
 
-            let arweave = Arweave::from_keypair_path(keypair_path, None)
+            let arweave = Arweave::from_keypair_path(PathBuf::from(keypair_path), None)
                 .await
                 .unwrap();
             let (sub_sub_command, sub_arg_matches) = arg_matches.subcommand();
@@ -1433,7 +1433,7 @@ async fn command_get_transaction(arweave: &Arweave, id: &str) -> CommandResult {
 
 async fn command_check_status(arweave: &Arweave, id: &str) -> CommandResult {
     let id = Base64::from_str(id)?;
-    let status = arweave.check_status(&id).await?;
+    let status = arweave.get_raw_status(&id).await?;
     println!("Status for transaction id {}: {:?}", &id, &status);
     Ok(None)
 }
@@ -1472,10 +1472,10 @@ async fn command_wallet_balance(
 
 async fn command_file_upload(arweave: &Arweave, file_path: &str) -> CommandResult {
     let transaction = arweave
-        .create_transaction_from_file_path(file_path, None, None, None)
+        .create_transaction_from_file_path(PathBuf::from(file_path), None, None, None)
         .await?;
     let signed_transaction = arweave.sign_transaction(transaction)?;
-    arweave.post_transaction(&signed_transaction).await?;
+    arweave.post_transaction(&signed_transaction, None).await?;
     println!(
         "{} submitted for upload with transaction id {}. Check status to confirm the transaction was accepted.",
         file_path, &signed_transaction.id
