@@ -25,6 +25,7 @@ pub mod crypto;
 pub mod error;
 pub mod merkle;
 pub mod transaction;
+pub mod utils;
 
 use crypto::Methods as CryptoMethods;
 use merkle::{generate_data_root, generate_leaves, resolve_proofs};
@@ -372,14 +373,17 @@ impl Methods<Arweave> for Arweave {
     async fn read_status(&self, file_path: PathBuf, log_dir: PathBuf) -> Result<Status, Error> {
         let file_path_hash = blake3::hash(file_path.to_str().unwrap().as_bytes());
 
-        let data = fs::read_to_string(
-            log_dir
-                .join(file_path_hash.to_string())
-                .with_extension("json"),
-        )
-        .await?;
-        let status: Status = serde_json::from_str(&data)?;
-        Ok(status)
+        let status_path = log_dir
+            .join(file_path_hash.to_string())
+            .with_extension("json");
+
+        if status_path.exists() {
+            let data = fs::read_to_string(status_path).await?;
+            let status: Status = serde_json::from_str(&data)?;
+            Ok(status)
+        } else {
+            Err(ArweaveError::StatusNotFound)
+        }
     }
 
     async fn read_statuses<IP>(
@@ -399,8 +403,13 @@ impl Methods<Arweave> for Arweave {
         status.last_modified = now();
         match resp.status() {
             ResponseStatusCode::OK => {
-                // status.raw_status = Some(resp.json::<RawStatus>().await?);
-                status.status = StatusCode::Confirmed;
+                let resp_string = resp.text().await?;
+                if &resp_string == &String::from("Pending") {
+                    status.status = StatusCode::Pending;
+                } else {
+                    status.raw_status = Some(serde_json::from_str(&resp_string)?);
+                    status.status = StatusCode::Confirmed;
+                }
             }
             ResponseStatusCode::NOT_FOUND => {
                 status.status = StatusCode::NotFound;
@@ -514,6 +523,7 @@ mod tests {
     use crate::{
         error::ArweaveError,
         transaction::{Base64, FromStrs, Tag},
+        utils::{TempDir, TempFrom},
         Arweave, Methods as ArewaveMethods, Status,
     };
     use matches::assert_matches;
@@ -577,7 +587,8 @@ mod tests {
             ..Default::default()
         };
 
-        let log_dir = PathBuf::from("../target/tmp");
+        let temp_log_dir = TempDir::from_str("../target/tmp/").await?;
+        let log_dir = temp_log_dir.0.clone();
 
         arweave
             .write_status(status.clone(), log_dir.clone())

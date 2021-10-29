@@ -1,10 +1,11 @@
 use arweave_rs::{
-    transaction::{Base64, Tag},
+    transaction::Tag,
+    utils::{TempDir, TempFrom},
     Arweave, Error, Methods as ArewaveMethods, Status, StatusCode,
 };
+use futures::future::try_join_all;
 use glob::glob;
-use ring::rand::generate;
-use std::{iter, path::PathBuf, str::FromStr};
+use std::{iter, path::PathBuf};
 
 async fn get_arweave() -> Result<Arweave, Error> {
     let keypair_path =
@@ -12,6 +13,13 @@ async fn get_arweave() -> Result<Arweave, Error> {
     let base_url = "http://localhost:1984/";
     let arweave = Arweave::from_keypair_path(PathBuf::from(keypair_path), Some(base_url)).await?;
     Ok(arweave)
+}
+
+async fn mine(arweave: &Arweave) -> Result<(), Error> {
+    let url = arweave.base_url.join("mine")?;
+    let resp = reqwest::get(url).await?.text().await?;
+    println!("mine resp: {}", resp);
+    Ok(())
 }
 
 #[tokio::test]
@@ -24,9 +32,8 @@ async fn test_post_transaction() -> Result<(), Error> {
     }
 
     let file_path = PathBuf::from("tests/fixtures/0.png");
-    let last_tx = Base64::from_str("LCwsLCwsLA")?;
     let transaction = arweave
-        .create_transaction_from_file_path(file_path, None, Some(last_tx), Some(0))
+        .create_transaction_from_file_path(file_path, None, None, Some(0))
         .await?;
 
     let signed_transaction = arweave.sign_transaction(transaction)?;
@@ -52,23 +59,22 @@ async fn test_upload_file_from_path() -> Result<(), Error> {
     }
 
     let file_path = PathBuf::from("tests/fixtures/0.png");
-    let last_tx = Base64::from_str("LCwsLCwsLA")?;
-    let log_dir = PathBuf::from("../target/tmp");
+    let temp_log_dir = TempDir::from_str("../target/tmp/").await?;
+    let log_dir = temp_log_dir.0.clone();
 
     let status = arweave
         .upload_file_from_path(
             file_path.clone(),
             Some(log_dir.clone()),
             None,
-            Some(last_tx),
+            None,
             Some(0),
         )
         .await?;
 
-    let read_status = arweave.read_status(file_path, log_dir).await?;
+    let read_status = arweave.read_status(file_path, log_dir.clone()).await?;
     println!("{:?}", &read_status);
     assert_eq!(status, read_status);
-
     Ok(())
 }
 
@@ -82,15 +88,15 @@ async fn test_update_status() -> Result<(), Error> {
     }
 
     let file_path = PathBuf::from("tests/fixtures/0.png");
-    let last_tx = Base64::from_str("LCwsLCwsLA")?;
-    let log_dir = PathBuf::from("../target/tmp");
+    let temp_log_dir = TempDir::from_str("../target/tmp/").await?;
+    let log_dir = temp_log_dir.0.clone();
 
     let _ = arweave
         .upload_file_from_path(
             file_path.clone(),
             Some(log_dir.clone()),
             None,
-            Some(last_tx),
+            None,
             Some(0),
         )
         .await?;
@@ -104,7 +110,7 @@ async fn test_update_status() -> Result<(), Error> {
     let resp = reqwest::get(url).await?.text().await?;
     println!("mine resp: {}", resp);
 
-    let updated_status = arweave.update_status(file_path, log_dir).await?;
+    let updated_status = arweave.update_status(file_path, log_dir.clone()).await?;
     println!("{:?}", &updated_status);
     assert_eq!(updated_status.status, StatusCode::Confirmed);
     assert!(updated_status.last_modified > read_status.last_modified);
@@ -121,18 +127,19 @@ async fn test_upload_files_from_paths_without_tags() -> Result<(), Error> {
     }
 
     let paths_iter = glob("tests/fixtures/*.png")?.filter_map(Result::ok);
-    let last_tx = Some(Base64::from_str("LCwsLCwsLA")?);
-    let log_dir = Some(PathBuf::from("../target/tmp"));
-    let reward = Some(0);
+    let temp_log_dir = TempDir::from_str("../target/tmp/").await?;
+    let log_dir = temp_log_dir.0.clone();
+
+    #[allow(unused_assignments)]
     let mut tags_iter = Some(iter::repeat(Some(Vec::<Tag>::new())));
     tags_iter = None;
 
     let statuses = arweave
-        .upload_files_from_paths(paths_iter, log_dir.clone(), tags_iter, last_tx, reward)
+        .upload_files_from_paths(paths_iter, Some(log_dir.clone()), tags_iter, None, Some(0))
         .await?;
 
     let paths_iter = glob("tests/fixtures/*.png")?.filter_map(Result::ok);
-    let read_statuses = arweave.read_statuses(paths_iter, log_dir.unwrap()).await?;
+    let read_statuses = arweave.read_statuses(paths_iter, log_dir.clone()).await?;
     assert_eq!(statuses, read_statuses);
     Ok(())
 }
@@ -147,16 +154,15 @@ async fn test_update_statuses() -> Result<(), Error> {
     }
 
     let paths_iter = glob("tests/fixtures/*.png")?.filter_map(Result::ok);
-    let last_tx = Some(Base64::from_str("LCwsLCwsLA")?);
-    let log_dir = Some(PathBuf::from("../target/tmp"));
+    let temp_log_dir = TempDir::from_str("../target/tmp/").await?;
+    let log_dir = temp_log_dir.0.clone();
 
-    // Keeping this unique across tests keep them from conflicting since they run concurrently.
-    let reward = Some(1);
+    #[allow(unused_assignments)]
     let mut tags_iter = Some(iter::repeat(Some(Vec::<Tag>::new())));
     tags_iter = None;
 
     let statuses = arweave
-        .upload_files_from_paths(paths_iter, log_dir.clone(), tags_iter, last_tx, reward)
+        .upload_files_from_paths(paths_iter, Some(log_dir.clone()), tags_iter, None, Some(0))
         .await?;
 
     println!("{:?}", statuses);
@@ -166,9 +172,7 @@ async fn test_update_statuses() -> Result<(), Error> {
 
     let paths_iter = glob("tests/fixtures/*.png")?.filter_map(Result::ok);
 
-    let update_statuses = arweave
-        .update_statuses(paths_iter, log_dir.unwrap())
-        .await?;
+    let update_statuses = arweave.update_statuses(paths_iter, log_dir.clone()).await?;
 
     println!("{:?}", update_statuses);
 
@@ -187,94 +191,111 @@ async fn test_filter_statuses() -> Result<(), Error> {
         println!("Test server not running.");
         return Ok(());
     }
+
+    let _ = mine(&arweave).await?;
     let paths_iter = glob("tests/fixtures/[0-4]*.png")?.filter_map(Result::ok);
-    // for p in paths_iter {
-    //     println!("{:?}", p);
-    // }
 
-    let last_tx = None;
-    let log_dir = Some(PathBuf::from("../target/tmp"));
+    let temp_log_dir = TempDir::from_str("../target/tmp/").await?;
+    let log_dir = temp_log_dir.0.clone();
 
-    // Keeping this unique across tests keep them from conflicting since they run concurrently.
-    let reward = Some(3);
+    #[allow(unused_assignments)]
     let mut tags_iter = Some(iter::repeat(Some(Vec::<Tag>::new())));
     tags_iter = None;
 
     // Upload the first five files.
-    let statuses = arweave
-        .upload_files_from_paths(paths_iter, log_dir.clone(), tags_iter, last_tx, reward)
-        .await?;
-
-    // Then min - these files should have be Status.status = StatusCode::Confirmed.
-    println!("{:?}", statuses);
-    let url = arweave.base_url.join("mine")?;
-    let resp = reqwest::get(url).await?.text().await?;
-    println!("mine resp: {}", resp);
-
-    let paths_iter = glob("tests/fixtures/[5-9]*.png")?.filter_map(Result::ok);
-    let last_tx = None;
-    let log_dir = Some(PathBuf::from("../target/tmp"));
-    let mut tags_iter = Some(iter::repeat(Some(Vec::<Tag>::new())));
-    tags_iter = None;
-
-    // Then upload another five files after mining. Status.status = StatusCode::NotFound.
-    let _ = arweave
-        .upload_files_from_paths(paths_iter, log_dir.clone(), tags_iter, last_tx, reward)
+    let _statuses = arweave
+        .upload_files_from_paths(
+            paths_iter,
+            Some(log_dir.clone()),
+            tags_iter.clone(),
+            None,
+            Some(0),
+        )
         .await?;
 
     // Now update all of the statuses.
-    let paths_iter = glob("tests/fixtures/[0-9].png")?.filter_map(Result::ok);
-    let update_statuses = arweave
-        .update_statuses(paths_iter, log_dir.clone().unwrap())
-        .await?;
+    let paths_iter = glob("tests/fixtures/[0-4]*.png")?.filter_map(Result::ok);
+    let update_statuses = arweave.update_statuses(paths_iter, log_dir.clone()).await?;
 
-    assert_eq!(update_statuses.len(), 10);
+    assert_eq!(update_statuses.len(), 5);
     println!("{:?}", update_statuses);
 
-    // There should be 5 confirmed.
-    let paths_iter = glob("tests/fixtures/[0-9].png")?.filter_map(Result::ok);
+    // There should be 5 StatusCode::Pending.
+    let paths_iter = glob("tests/fixtures/[0-4].png")?.filter_map(Result::ok);
+    let pending = arweave
+        .filter_statuses(paths_iter, log_dir.clone(), StatusCode::Pending, None)
+        .await?;
+    assert_eq!(pending.len(), 5);
+    println!("{:?}", pending);
+
+    // Then mine - these files should be Status.status = StatusCode::Confirmed.
+    let _ = mine(&arweave).await?;
+
+    // Now when we update statuses we should get five confirmed.
+    let paths_iter = glob("tests/fixtures/[0-4]*.png")?.filter_map(Result::ok);
+    let _updated_statuses = arweave.update_statuses(paths_iter, log_dir.clone()).await?;
+    let paths_iter = glob("tests/fixtures/[0-4].png")?.filter_map(Result::ok);
     let confirmed = arweave
-        .filter_statuses(
-            paths_iter,
-            log_dir.clone().unwrap(),
-            StatusCode::Confirmed,
-            None,
-        )
+        .filter_statuses(paths_iter, log_dir.clone(), StatusCode::Confirmed, None)
         .await?;
     assert_eq!(confirmed.len(), 5);
     println!("{:?}", confirmed);
 
-    // There should be 5 not found.
+    // Now write statuses to the log_dir without uploading them so that we get not found when we try
+    // to fetch their raw statuses from the server.
+    let paths_iter = glob("tests/fixtures/[5-9]*.png")?.filter_map(Result::ok);
+    let transactions = try_join_all(
+        paths_iter.map(|p| arweave.create_transaction_from_file_path(p, None, None, Some(0))),
+    )
+    .await?;
+    let _ = try_join_all(
+        transactions
+            .into_iter()
+            .map(|t| arweave.sign_transaction(t))
+            .filter_map(Result::ok)
+            .zip(glob("tests/fixtures/[5-9]*.png")?.filter_map(Result::ok))
+            .map(|(s, p)| {
+                arweave.write_status(
+                    Status {
+                        id: s.id.clone(),
+                        reward: s.reward,
+                        file_path: Some(p),
+                        ..Default::default()
+                    },
+                    log_dir.clone(),
+                )
+            }),
+    )
+    .await?;
+
+    // We should now have ten statuses
+    let paths_iter = glob("tests/fixtures/[0-9]*.png")?.filter_map(Result::ok);
+    let updated_statuses = arweave.update_statuses(paths_iter, log_dir.clone()).await?;
+    assert_eq!(updated_statuses.len(), 10);
+
+    // With five not found
     let paths_iter = glob("tests/fixtures/[0-9].png")?.filter_map(Result::ok);
     let not_found = arweave
-        .filter_statuses(
-            paths_iter,
-            log_dir.clone().unwrap(),
-            StatusCode::NotFound,
-            None,
-        )
+        .filter_statuses(paths_iter, log_dir.clone(), StatusCode::NotFound, None)
         .await?;
     assert_eq!(not_found.len(), 5);
-    println!("{:?}", not_found);
 
-    // Now if we mine again and update the statuses, we should have all ten confirmed.
-    // Then min - these files should have be Status.status = StatusCode::Confirmed.
-    println!("{:?}", statuses);
-    let url = arweave.base_url.join("mine")?;
-    let resp = reqwest::get(url).await?.text().await?;
-    println!("mine resp: {}", resp);
-
-    let paths_iter = glob("tests/fixtures/[0-9].png")?.filter_map(Result::ok);
-    let update_statuses = arweave
-        .update_statuses(paths_iter, log_dir.clone().unwrap())
+    // Now if we upload transactions for the not found statuses and mine we should have ten confirmed transactions.
+    let paths_iter = glob("tests/fixtures/[5-9]*.png")?.filter_map(Result::ok);
+    let _statuses = arweave
+        .upload_files_from_paths(paths_iter, Some(log_dir.clone()), tags_iter, None, Some(0))
         .await?;
 
-    assert_eq!(update_statuses.len(), 10);
-    println!("{:?}", update_statuses);
+    let _ = mine(&arweave).await?;
 
-    let all_confirmed = update_statuses
-        .iter()
-        .all(|s| s.status == StatusCode::Confirmed);
-    assert!(all_confirmed);
+    let paths_iter = glob("tests/fixtures/[0-9]*.png")?.filter_map(Result::ok);
+    let updated_statuses = arweave.update_statuses(paths_iter, log_dir.clone()).await?;
+    assert_eq!(updated_statuses.len(), 10);
+
+    let paths_iter = glob("tests/fixtures/[0-9].png")?.filter_map(Result::ok);
+    let confirmed = arweave
+        .filter_statuses(paths_iter, log_dir.clone(), StatusCode::Confirmed, None)
+        .await?;
+    assert_eq!(confirmed.len(), 10);
     Ok(())
 }
