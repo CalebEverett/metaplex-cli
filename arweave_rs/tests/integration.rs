@@ -148,7 +148,9 @@ async fn test_update_statuses() -> Result<(), Error> {
     let paths_iter = glob("tests/fixtures/*.png")?.filter_map(Result::ok);
     let last_tx = Some(Base64::from_str("LCwsLCwsLA")?);
     let log_dir = Some(PathBuf::from("../target/tmp"));
-    let reward = Some(0);
+
+    // Keeping this unique across tests keep them from conflicting since they run concurrently.
+    let reward = Some(1);
     let mut tags_iter = Some(iter::repeat(Some(Vec::<Tag>::new())));
     tags_iter = None;
 
@@ -162,11 +164,14 @@ async fn test_update_statuses() -> Result<(), Error> {
     println!("mine resp: {}", resp);
 
     let paths_iter = glob("tests/fixtures/*.png")?.filter_map(Result::ok);
-    let read_statuses = arweave.read_statuses(paths_iter, log_dir.unwrap()).await?;
 
-    println!("{:?}", read_statuses);
+    let update_statuses = arweave
+        .update_statuses(paths_iter, log_dir.unwrap())
+        .await?;
 
-    let all_confirmed = read_statuses
+    println!("{:?}", update_statuses);
+
+    let all_confirmed = update_statuses
         .iter()
         .all(|s| s.status == StatusCode::Confirmed);
     assert!(all_confirmed);

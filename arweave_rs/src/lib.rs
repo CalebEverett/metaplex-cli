@@ -1,5 +1,6 @@
 #![feature(derive_default_enum)]
 
+use crate::error::ArweaveError;
 use async_trait::async_trait;
 use blake3;
 use futures::future::try_join_all;
@@ -9,6 +10,7 @@ use num_bigint::BigUint;
 use reqwest::{
     self,
     header::{ACCEPT, CONTENT_TYPE},
+    StatusCode as ResponseStatusCode,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -28,8 +30,7 @@ use crypto::Methods as CryptoMethods;
 use merkle::{generate_data_root, generate_leaves, resolve_proofs};
 use transaction::{Base64, FromStrs, Tag, Transaction};
 
-pub type Error = Box<dyn std::error::Error>;
-// pub type Error = Box<dyn std::error::Error + 'static + Send + Sync>;
+pub type Error = ArweaveError;
 
 pub struct Arweave {
     pub name: String,
@@ -122,7 +123,7 @@ pub trait Methods<T> {
         file_path: Option<PathBuf>,
     ) -> Result<Status, Error>;
 
-    async fn get_raw_status(&self, id: &Base64) -> Result<RawStatus, Error>;
+    async fn get_raw_status(&self, id: &Base64) -> Result<reqwest::Response, Error>;
 
     async fn write_status(&self, mut status: Status, log_dir: PathBuf) -> Result<(), Error>;
 
@@ -327,11 +328,10 @@ impl Methods<Arweave> for Arweave {
         Ok(status)
     }
 
-    async fn get_raw_status(&self, id: &Base64) -> Result<RawStatus, Error> {
+    async fn get_raw_status(&self, id: &Base64) -> Result<reqwest::Response, Error> {
         let url = self.base_url.join(&format!("tx/{}/status", id))?;
         let resp = reqwest::get(url).await?;
         println!("{:?}", resp);
-        let resp = resp.json::<RawStatus>().await?;
         Ok(resp)
     }
 
@@ -356,7 +356,7 @@ impl Methods<Arweave> for Arweave {
             .await?;
             Ok(())
         } else {
-            Err(error::ArweaveError::MissingFilePath.into())
+            Err(error::ArweaveError::MissingFilePath)
         }
     }
 
@@ -386,20 +386,19 @@ impl Methods<Arweave> for Arweave {
 
     async fn update_status(&self, file_path: PathBuf, log_dir: PathBuf) -> Result<Status, Error> {
         let mut status = self.read_status(file_path, log_dir.clone()).await?;
-        let raw_status = self.get_raw_status(&status.id).await;
+        let resp = self.get_raw_status(&status.id).await?;
         status.last_modified = now();
-        match raw_status {
-            Ok(raw_status) => {
-                status.raw_status = Some(raw_status);
+        match resp.status() {
+            ResponseStatusCode::OK => {
+                status.raw_status = Some(resp.json::<RawStatus>().await?);
                 status.status = StatusCode::Confirmed;
-                // self.write_status(status, log_dir).await?;
             }
-            Err(_) => {
+            ResponseStatusCode::NOT_FOUND => {
                 status.status = StatusCode::NotFound;
-                // self.write_status(status, log_dir).await?;
             }
+            _ => unreachable!(),
         }
-
+        self.write_status(status.clone(), log_dir).await?;
         Ok(status)
     }
 
@@ -473,8 +472,9 @@ mod tests {
         transaction::{Base64, FromStrs, Tag},
         Arweave, Methods as ArewaveMethods, Status,
     };
+    use matches::assert_matches;
     use std::{path::PathBuf, str::FromStr};
-    pub type Error = Box<dyn std::error::Error>;
+    pub type Error = ArweaveError;
 
     #[tokio::test]
     async fn test_cannot_post_unsigned_transaction() -> Result<(), Error> {
@@ -497,10 +497,7 @@ mod tests {
             .post_transaction(&transaction, None)
             .await
             .unwrap_err();
-        assert_eq!(
-            &*error.downcast::<ArweaveError>()?,
-            &ArweaveError::UnsignedTransaction
-        );
+        assert_matches!(error, ArweaveError::UnsignedTransaction);
 
         Ok(())
     }

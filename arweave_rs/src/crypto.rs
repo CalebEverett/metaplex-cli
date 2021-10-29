@@ -8,8 +8,11 @@ use ring::{
 };
 use std::path::PathBuf;
 use tokio::fs;
-type Error = Box<dyn std::error::Error>;
-use crate::transaction::{Base64, DeepHashItem, Tag, ToItems, Transaction};
+type Error = ArweaveError;
+use crate::{
+    error::ArweaveError,
+    transaction::{Base64, DeepHashItem, Tag, ToItems, Transaction},
+};
 
 pub struct Provider {
     pub keypair: RsaKeyPair,
