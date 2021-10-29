@@ -1,8 +1,11 @@
-use crate::merkle::{Node, Proof};
+use crate::{
+    error::ArweaveError,
+    merkle::{Node, Proof},
+};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
 
-type Error = Box<dyn std::error::Error>;
+type Error = ArweaveError;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Transaction {
