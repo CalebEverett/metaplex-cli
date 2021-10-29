@@ -28,11 +28,11 @@ jobs:
           sudo apt-get install -y libssl-dev --allow-unauthenticated
           sudo apt-get install -y libssl1.1 --allow-unauthenticated
           sudo apt-get install -y libudev-dev --allow-unauthenticated
-          sh -c "$(curl -sSfL https://release.solana.com/v1.8.0/install)"
+          sh -c "$(curl -sSfL https://release.solana.com/v1.8.2/install)"
           export PATH=~/.local/share/solana/install/active_release/bin:$PATH
           solana-install info
           solana-keygen new --no-bip39-passphrase
           # solana-test-validator --quiet &
           cargo build
-          cargo test -- --no-capture
+          cargo test -- --nocapture
           
