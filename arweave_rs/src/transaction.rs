@@ -103,7 +103,7 @@ impl<'a> ToItems<'a, Transaction> for Transaction {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Tag {
     pub name: Base64,
     pub value: Base64,

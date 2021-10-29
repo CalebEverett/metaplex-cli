@@ -8,4 +8,6 @@ pub enum ArweaveError {
     InvalidTags,
     #[error("Transaction is not signed.")]
     UnsignedTransaction,
+    #[error("File path not provided.")]
+    MissingFilePath,
 }

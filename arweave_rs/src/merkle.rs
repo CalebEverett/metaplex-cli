@@ -2,7 +2,9 @@ use crate::{
     crypto::{Methods, Provider},
     error::ArweaveError,
 };
+use anyhow;
 use borsh::BorshDeserialize;
+
 type Error = Box<dyn std::error::Error>;
 
 /// Single struct used for chunks and nodes.
@@ -22,7 +24,7 @@ pub struct Proof {
     pub proof: Vec<u8>,
 }
 
-/// Uses Borsh to deserialze [u8] chunk proofs into
+/// Uses Borsh to deserialze `[u8]` chunk proofs into
 /// nodes to make it easier to reason about validation.
 #[repr(C)]
 #[derive(BorshDeserialize, Debug, PartialEq, Clone)]

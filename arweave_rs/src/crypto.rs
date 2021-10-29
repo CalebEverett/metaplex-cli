@@ -292,7 +292,7 @@ mod tests {
             let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
             let transaction = arweave
                 .create_transaction_from_file_path(
-                    &PathBuf::from("tests/fixtures/").join(file_stem),
+                    PathBuf::from("tests/fixtures/").join(file_stem),
                     Some(other_tags),
                     Some(last_tx),
                     Some(0),
@@ -333,7 +333,7 @@ mod tests {
             let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
             let transaction = arweave
                 .create_transaction_from_file_path(
-                    &PathBuf::from("tests/fixtures/").join(file_stem),
+                    PathBuf::from("tests/fixtures/").join(file_stem),
                     Some(other_tags),
                     Some(last_tx),
                     Some(0),
@@ -362,7 +362,7 @@ mod tests {
         let last_tx = Base64::from_str("LCwsLCwsLA")?;
         let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
         let transaction = arweave
-            .create_transaction_from_file_path(&file_path, Some(other_tags), Some(last_tx), Some(0))
+            .create_transaction_from_file_path(file_path, Some(other_tags), Some(last_tx), Some(0))
             .await?;
 
         let start = Instant::now();

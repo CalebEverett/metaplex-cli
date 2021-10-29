@@ -62,3 +62,8 @@ Includes standalone functionality to calculate merkle roots for chunked transact
 * [https://bundlr.arweave.net/](https://bundlr.arweave.net/)
 * [Bundlr discord channel](https://discord.com/channels/864852288002850866/865652381928259634)
 * [ardrive-cli](https://github.com/ardriveapp/ardrive-cli)
+* [IPFS and Friends: A Qualitative Comparison of Next Generation Peer-to-Peer Data Networks](https://arxiv.org/pdf/2102.12737.pdf)
+
+### Error Handling
+ * [anyhow](https://github.com/dtolnay/anyhow)
+ * [thiserror](https://docs.rs/thiserror/1.0.30/thiserror/)

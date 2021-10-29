@@ -1,6 +1,8 @@
 #![feature(derive_default_enum)]
 
 use async_trait::async_trait;
+use blake3;
+use futures::future::try_join_all;
 use infer;
 use log::debug;
 use num_bigint::BigUint;
@@ -27,6 +29,7 @@ use merkle::{generate_data_root, generate_leaves, resolve_proofs};
 use transaction::{Base64, FromStrs, Tag, Transaction};
 
 pub type Error = Box<dyn std::error::Error>;
+// pub type Error = Box<dyn std::error::Error + 'static + Send + Sync>;
 
 pub struct Arweave {
     pub name: String,
@@ -36,14 +39,14 @@ pub struct Arweave {
 }
 
 #[allow(dead_code)]
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct RawStatus {
     block_height: u64,
     block_indep_hash: Base64,
     number_of_confirmations: u64,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 pub enum StatusCode {
     #[default]
     Submitted,
@@ -51,33 +54,36 @@ pub enum StatusCode {
     Pending,
     Confirmed,
 }
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Status {
-    id: Base64,
-    status: StatusCode,
-    file_path: Option<PathBuf>,
-    created_at: Duration,
-    last_modified: Duration,
-    reward: u64,
+    pub id: Base64,
+    pub status: StatusCode,
+    pub file_path: Option<PathBuf>,
+    pub created_at: Duration,
+    pub last_modified: Duration,
+    pub reward: u64,
     #[serde(flatten)]
-    raw_status: Option<RawStatus>,
+    pub raw_status: Option<RawStatus>,
 }
 
 impl Default for Status {
     fn default() -> Self {
-        let created_at = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap();
         Self {
             id: Base64(vec![]),
             status: StatusCode::default(),
             file_path: None,
-            created_at,
-            last_modified: created_at,
+            created_at: now(),
+            last_modified: now(),
             reward: 0,
             raw_status: None,
         }
     }
+}
+
+pub fn now() -> Duration {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -93,25 +99,73 @@ struct OraclePricePair {
 #[async_trait]
 pub trait Methods<T> {
     async fn from_keypair_path(keypair_path: PathBuf, base_url: Option<&str>) -> Result<T, Error>;
+
     async fn get_wallet_balance(&self, wallet_address: Option<String>) -> Result<BigUint, Error>;
+
     async fn get_price(&self, bytes: &usize) -> Result<(BigUint, BigUint), Error>;
+
     async fn get_transaction(&self, id: &Base64) -> Result<Transaction, Error>;
+
     async fn create_transaction_from_file_path(
         &self,
-        file_path: &PathBuf,
-        other_tags: Option<Vec<Tag>>,
+        file_path: PathBuf,
+        additional_tags: Option<Vec<Tag>>,
         last_tx: Option<Base64>,
         reward: Option<u64>,
     ) -> Result<Transaction, Error>;
+
     fn sign_transaction(&self, transaction: Transaction) -> Result<Transaction, Error>;
+
     async fn post_transaction(
         &self,
         signed_transaction: &Transaction,
         file_path: Option<PathBuf>,
     ) -> Result<Status, Error>;
-    async fn check_status(&self, id: &Base64) -> Result<Status, Error>;
-    async fn write_status(&self, mut status: &Status, log_path: &PathBuf) -> Result<(), Error>;
-    async fn read_status(&self, id: &Base64, log_path: &PathBuf) -> Result<Status, Error>;
+
+    async fn get_raw_status(&self, id: &Base64) -> Result<RawStatus, Error>;
+
+    async fn write_status(&self, mut status: Status, log_dir: PathBuf) -> Result<(), Error>;
+
+    async fn read_status(&self, file_path: PathBuf, log_dir: PathBuf) -> Result<Status, Error>;
+
+    async fn read_statuses<IP>(
+        &self,
+        paths_iter: IP,
+        log_dir: PathBuf,
+    ) -> Result<Vec<Status>, Error>
+    where
+        IP: Iterator<Item = PathBuf> + Send;
+
+    async fn update_status(&self, file_path: PathBuf, log_dir: PathBuf) -> Result<Status, Error>;
+
+    async fn update_statuses<IP>(
+        &self,
+        paths_iter: IP,
+        log_dir: PathBuf,
+    ) -> Result<Vec<Status>, Error>
+    where
+        IP: Iterator<Item = PathBuf> + Send;
+
+    async fn upload_file_from_path(
+        &self,
+        file_path: PathBuf,
+        log_dir: Option<PathBuf>,
+        additional_tags: Option<Vec<Tag>>,
+        last_tx: Option<Base64>,
+        reward: Option<u64>,
+    ) -> Result<Status, Error>;
+
+    async fn upload_files_from_paths<IP, IT>(
+        &self,
+        paths_iter: IP,
+        log_dir: Option<PathBuf>,
+        tags_iter: Option<IT>,
+        last_tx: Option<Base64>,
+        reward: Option<u64>,
+    ) -> Result<Vec<Status>, Error>
+    where
+        IP: Iterator<Item = PathBuf> + Send,
+        IT: Iterator<Item = Option<Vec<Tag>>> + Send;
 }
 
 #[async_trait]
@@ -169,7 +223,7 @@ impl Methods<Arweave> for Arweave {
 
     async fn create_transaction_from_file_path(
         &self,
-        file_path: &PathBuf,
+        file_path: PathBuf,
         other_tags: Option<Vec<Tag>>,
         last_tx: Option<Base64>,
         reward: Option<u64>,
@@ -273,30 +327,142 @@ impl Methods<Arweave> for Arweave {
         Ok(status)
     }
 
-    async fn check_status(&self, id: &Base64) -> Result<Status, Error> {
+    async fn get_raw_status(&self, id: &Base64) -> Result<RawStatus, Error> {
         let url = self.base_url.join(&format!("tx/{}/status", id))?;
         let resp = reqwest::get(url).await?;
         println!("{:?}", resp);
-        let resp = resp.json::<Status>().await?;
+        let resp = resp.json::<RawStatus>().await?;
         Ok(resp)
     }
 
-    async fn write_status(&self, status: &Status, log_path: &PathBuf) -> Result<(), Error> {
-        if status.id.0.is_empty() {
-            return Err(error::ArweaveError::UnsignedTransaction.into());
+    /// Writes Status Json to `log_dir` with file name based on BLAKE3 hash of `status.file_path`.
+    ///
+    /// This is done to facilitate checking the status of uploaded file and also means that only
+    /// one status object can exist for a given `file_path`. If for some reason you wanted to record
+    /// statuses for multiple uploads of the same file you can provide a different log_dir (or copy the
+    /// file to a different directory and upload from there).
+    async fn write_status(&self, status: Status, log_dir: PathBuf) -> Result<(), Error> {
+        if let Some(file_path) = &status.file_path {
+            if status.id.0.is_empty() {
+                return Err(error::ArweaveError::UnsignedTransaction.into());
+            }
+            let file_path_hash = blake3::hash(file_path.to_str().unwrap().as_bytes());
+            fs::write(
+                log_dir
+                    .join(file_path_hash.to_string())
+                    .with_extension("json"),
+                serde_json::to_string(&status)?,
+            )
+            .await?;
+            Ok(())
+        } else {
+            Err(error::ArweaveError::MissingFilePath.into())
         }
-        fs::write(
-            log_path.join(status.id.to_string()).with_extension("json"),
-            serde_json::to_string(&status)?,
-        )
-        .await?;
-        Ok(())
     }
 
-    async fn read_status(&self, id: &Base64, log_path: &PathBuf) -> Result<Status, Error> {
-        let data = fs::read_to_string(log_path.join(id.to_string()).with_extension("json")).await?;
+    async fn read_status(&self, file_path: PathBuf, log_dir: PathBuf) -> Result<Status, Error> {
+        let file_path_hash = blake3::hash(file_path.to_str().unwrap().as_bytes());
+
+        let data = fs::read_to_string(
+            log_dir
+                .join(file_path_hash.to_string())
+                .with_extension("json"),
+        )
+        .await?;
         let status: Status = serde_json::from_str(&data)?;
         Ok(status)
+    }
+
+    async fn read_statuses<IP>(
+        &self,
+        paths_iter: IP,
+        log_dir: PathBuf,
+    ) -> Result<Vec<Status>, Error>
+    where
+        IP: Iterator<Item = PathBuf> + Send,
+    {
+        try_join_all(paths_iter.map(|p| self.read_status(p, log_dir.clone()))).await
+    }
+
+    async fn update_status(&self, file_path: PathBuf, log_dir: PathBuf) -> Result<Status, Error> {
+        let mut status = self.read_status(file_path, log_dir.clone()).await?;
+        let raw_status = self.get_raw_status(&status.id).await;
+        status.last_modified = now();
+        match raw_status {
+            Ok(raw_status) => {
+                status.raw_status = Some(raw_status);
+                status.status = StatusCode::Confirmed;
+                // self.write_status(status, log_dir).await?;
+            }
+            Err(_) => {
+                status.status = StatusCode::NotFound;
+                // self.write_status(status, log_dir).await?;
+            }
+        }
+
+        Ok(status)
+    }
+
+    async fn update_statuses<IP>(
+        &self,
+        paths_iter: IP,
+        log_dir: PathBuf,
+    ) -> Result<Vec<Status>, Error>
+    where
+        IP: Iterator<Item = PathBuf> + Send,
+    {
+        try_join_all(paths_iter.map(|p| self.update_status(p, log_dir.clone()))).await
+    }
+
+    async fn upload_file_from_path(
+        &self,
+        file_path: PathBuf,
+        log_dir: Option<PathBuf>,
+        additional_tags: Option<Vec<Tag>>,
+        last_tx: Option<Base64>,
+        reward: Option<u64>,
+    ) -> Result<Status, Error> {
+        let transaction = self
+            .create_transaction_from_file_path(file_path.clone(), additional_tags, last_tx, reward)
+            .await?;
+        let signed_transaction = self.sign_transaction(transaction)?;
+        let status = self
+            .post_transaction(&signed_transaction, Some(file_path))
+            .await?;
+
+        if let Some(log_dir) = log_dir {
+            self.write_status(status.clone(), log_dir).await?;
+        }
+        Ok(status)
+    }
+
+    /// Uploads files from an iterator of paths.
+    ///
+    /// Optionally logs Status objects to `log_dir`, if provided and optionally adds tags to each
+    ///  transaction from an iterator of tags that must be the same size as the paths iterator.
+    async fn upload_files_from_paths<IP, IT>(
+        &self,
+        paths_iter: IP,
+        log_dir: Option<PathBuf>,
+        tags_iter: Option<IT>,
+        last_tx: Option<Base64>,
+        reward: Option<u64>,
+    ) -> Result<Vec<Status>, Error>
+    where
+        IP: Iterator<Item = PathBuf> + Send,
+        IT: Iterator<Item = Option<Vec<Tag>>> + Send,
+    {
+        let statuses = if let Some(tags_iter) = tags_iter {
+            try_join_all(paths_iter.zip(tags_iter).map(|(p, t)| {
+                self.upload_file_from_path(p, log_dir.clone(), t, last_tx.clone(), reward)
+            }))
+        } else {
+            try_join_all(paths_iter.map(|p| {
+                self.upload_file_from_path(p, log_dir.clone(), None, last_tx.clone(), reward)
+            }))
+        }
+        .await?;
+        Ok(statuses)
     }
 }
 
@@ -324,7 +490,7 @@ mod tests {
         let last_tx = Base64::from_str("LCwsLCwsLA")?;
         let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
         let transaction = arweave
-            .create_transaction_from_file_path(&file_path, Some(other_tags), Some(last_tx), Some(0))
+            .create_transaction_from_file_path(file_path, Some(other_tags), Some(last_tx), Some(0))
             .await?;
 
         let error = arweave
@@ -353,7 +519,12 @@ mod tests {
         let last_tx = Base64::from_str("LCwsLCwsLA")?;
         let other_tags = vec![Tag::from_utf8_strs("key2", "value2")?];
         let transaction = arweave
-            .create_transaction_from_file_path(&file_path, Some(other_tags), Some(last_tx), Some(0))
+            .create_transaction_from_file_path(
+                file_path.clone(),
+                Some(other_tags),
+                Some(last_tx),
+                Some(0),
+            )
             .await?;
 
         let signed_transaction = arweave.sign_transaction(transaction)?;
@@ -361,17 +532,17 @@ mod tests {
         let status = Status {
             id: signed_transaction.id.clone(),
             reward: signed_transaction.reward,
-            file_path: Some(file_path),
+            file_path: Some(file_path.clone()),
             ..Default::default()
         };
 
         let log_dir = PathBuf::from("../target/tmp");
 
-        arweave.write_status(&status, &log_dir).await?;
-
-        let read_status = arweave
-            .read_status(&signed_transaction.id, &log_dir)
+        arweave
+            .write_status(status.clone(), log_dir.clone())
             .await?;
+
+        let read_status = arweave.read_status(file_path, log_dir).await?;
 
         assert_eq!(status, read_status);
 
