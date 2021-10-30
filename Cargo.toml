@@ -2,5 +2,5 @@
 
 members = [
     "metaplex_cli",
-    "arweave_rs",
+    "arload",
 ]

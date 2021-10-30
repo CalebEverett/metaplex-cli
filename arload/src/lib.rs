@@ -3,7 +3,8 @@
 use crate::error::ArweaveError;
 use async_trait::async_trait;
 use blake3;
-use futures::future::try_join_all;
+use chrono::Utc;
+use futures::{future::try_join_all, stream, Stream, StreamExt};
 use infer;
 use log::debug;
 use num_bigint::BigUint;
@@ -13,25 +14,25 @@ use reqwest::{
     StatusCode as ResponseStatusCode,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    path::PathBuf,
-    str::FromStr,
-    time::{Duration, SystemTime},
-};
+use std::{path::PathBuf, str::FromStr};
 use tokio::fs;
 use url::Url;
 
 pub mod crypto;
 pub mod error;
 pub mod merkle;
+pub mod status;
 pub mod transaction;
 pub mod utils;
 
 use crypto::Methods as CryptoMethods;
 use merkle::{generate_data_root, generate_leaves, resolve_proofs};
+use status::{Status, StatusCode};
 use transaction::{Base64, FromStrs, Tag, Transaction};
 
 pub type Error = ArweaveError;
+
+pub const WINSTONS_PER_AR: u64 = 1000000000000;
 
 pub struct Arweave {
     pub name: String,
@@ -40,52 +41,22 @@ pub struct Arweave {
     pub crypto: crypto::Provider,
 }
 
-#[allow(dead_code)]
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-pub struct RawStatus {
-    block_height: u64,
-    block_indep_hash: Base64,
-    number_of_confirmations: u64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
-pub enum StatusCode {
-    #[default]
-    Submitted,
-    NotFound,
-    Pending,
-    Confirmed,
-}
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-pub struct Status {
-    pub id: Base64,
-    pub status: StatusCode,
-    pub file_path: Option<PathBuf>,
-    pub created_at: Duration,
-    pub last_modified: Duration,
-    pub reward: u64,
-    #[serde(flatten)]
-    pub raw_status: Option<RawStatus>,
-}
-
-impl Default for Status {
-    fn default() -> Self {
-        Self {
-            id: Base64(vec![]),
-            status: StatusCode::default(),
-            file_path: None,
-            created_at: now(),
-            last_modified: now(),
-            reward: 0,
-            raw_status: None,
-        }
-    }
-}
-
-pub fn now() -> Duration {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
+pub fn upload_files_stream<'a, IP>(
+    arweave: &'a Arweave,
+    paths_iter: IP,
+    log_dir: Option<PathBuf>,
+    last_tx: Option<Base64>,
+    reward: Option<u64>,
+    buffer: usize,
+) -> impl Stream<Item = Result<Status, Error>> + 'a
+where
+    IP: Iterator<Item = PathBuf> + Send + Sync + 'a,
+{
+    stream::iter(paths_iter)
+        .map(move |p| {
+            arweave.upload_file_from_path(p, log_dir.clone(), None, last_tx.clone(), reward)
+        })
+        .buffer_unordered(buffer)
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -395,7 +366,7 @@ impl Methods<Arweave> for Arweave {
     async fn update_status(&self, file_path: PathBuf, log_dir: PathBuf) -> Result<Status, Error> {
         let mut status = self.read_status(file_path, log_dir.clone()).await?;
         let resp = self.get_raw_status(&status.id).await?;
-        status.last_modified = now();
+        status.last_modified = Utc::now();
         match resp.status() {
             ResponseStatusCode::OK => {
                 let resp_string = resp.text().await?;

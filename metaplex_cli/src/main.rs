@@ -2,7 +2,6 @@ use clap::{
     self, crate_description, crate_name, crate_version, value_t, value_t_or_exit, App, AppSettings,
     Arg, ArgGroup, ArgMatches, SubCommand, Values,
 };
-use num_traits::cast::ToPrimitive;
 use spl_associated_token_account::{
     self, create_associated_token_account, get_associated_token_address,
 };
@@ -53,7 +52,7 @@ use spl_token::{
     self,
     state::{Account, Mint},
 };
-use std::{fmt::Display, path::PathBuf, process::exit, str::FromStr, sync::Arc};
+use std::{fmt::Display, process::exit, str::FromStr, sync::Arc};
 
 pub mod config;
 use crate::config::Config;
@@ -61,17 +60,10 @@ use crate::config::Config;
 pub mod output;
 use output::{println_display, CliMetadata, CliMint, CliTokenAmount, UiMetadata};
 
-use arweave_rs::{
-    transaction::{Base64, FromStrs, Tag},
-    Arweave, Methods as ArweaveMethods,
-};
-
 type Error = Box<dyn std::error::Error>;
 type CommandResult = Result<Option<(u64, Vec<Vec<Instruction>>)>, Error>;
 
 // CONSTANTS
-
-const WINSTONS_PER_AR: u64 = 1000000000000;
 
 // INPUT VALIDATORS
 
@@ -148,17 +140,6 @@ where
     }
 }
 
-fn is_valid_tag<T>(tag: T) -> Result<(), String>
-where
-    T: AsRef<str> + Display,
-{
-    let split: Vec<_> = tag.as_ref().split(":").collect();
-    match Tag::from_utf8_strs(split[0], split[1]) {
-        Ok(_) => Ok(()),
-        Err(e) => Err(format!("Not a valid tag.")),
-    }
-}
-
 // DATA HELPERS
 
 fn get_creators_vec(creator_values: Option<Values>) -> Option<Vec<Creator>> {
@@ -174,22 +155,6 @@ fn get_creators_vec(creator_values: Option<Values>) -> Option<Vec<Creator>> {
             creators.push(creator)
         });
         Some(creators)
-    } else {
-        None
-    }
-}
-
-fn get_tags_vec(tag_values: Option<Values>) -> Option<Vec<Tag>> {
-    if let Some(tag_strings) = tag_values {
-        let tags = tag_strings
-            .into_iter()
-            .map(|t| {
-                let split: Vec<&str> = t.split(":").collect();
-                Tag::from_utf8_strs(split[0], split[1])
-            })
-            .flat_map(Result::ok)
-            .collect();
-        Some(tags)
     } else {
         None
     }
@@ -668,110 +633,6 @@ fn get_app() -> App<'static, 'static> {
                         .required(true)
                         .help("The token address"),
                 ),
-        )
-        .subcommand(
-            SubCommand::with_name("arweave")
-                .about("Commands for interacting with Arweave.")
-                .arg(
-                    Arg::with_name("keypair_path")
-                        .long("keypair-path")
-                        .value_name("ARWEAVE_KEYPAIR_PATH")
-                        .takes_value(true)
-                        .validator(is_parsable::<PathBuf>)
-                        .env("ARWEAVE_KEYPAIR_PATH")
-                        .required(true)
-                        .help(
-                            "Specify path to keypair file for Arweave \
-                                wallet to pay for and sign upload transaction. \
-                                Defaults to value specified in \
-                                ARWEAVE_KEYPAIR_PATH environment variable.",
-                        ),
-                )
-                .subcommand(
-                    SubCommand::with_name("price")
-                        .about("Returns the price of uploading data.")
-                        .arg(
-                            Arg::with_name("bytes")
-                                .value_name("BYTES")
-                                .takes_value(true)
-                                .validator(is_parsable::<u32>)
-                                .help("Specify the number of bytes to to be uploaded."),
-                        ),
-                )
-                .subcommand(
-                    SubCommand::with_name("get-transaction")
-                        .about("Fetches file data from.")
-                        .arg(
-                            Arg::with_name("id")
-                                .value_name("ID")
-                                .takes_value(true)
-                                .validator(is_parsable::<Base64>)
-                                .help("Id of data to return from storage."),
-                        ),
-                )
-                .subcommand(
-                    SubCommand::with_name("wallet-balance")
-                        .about("Returns the balance of a wallet.")
-                        .arg(
-                            Arg::with_name("wallet_address")
-                                .value_name("WALLET_ADDRESS")
-                                .takes_value(true)
-                                .validator(is_parsable::<Base64>)
-                                .help(
-                                    "Specify wallet address for which to \
-                            return balance. Defaults to address of keypair \
-                            used by keypair-path argument.",
-                                ),
-                        ),
-                )
-                .subcommand(
-                    SubCommand::with_name("file-upload")
-                        .about("Uploads a single file.")
-                        .arg(
-                            Arg::with_name("file_path")
-                                .value_name("FILE_PATH")
-                                .takes_value(true)
-                                .required(true)
-                                .validator(is_parsable::<PathBuf>)
-                                .help("Path of the file to be uploaded."),
-                        )
-                        .arg(
-                            Arg::with_name("log_dir")
-                                .long("log-dir")
-                                .value_name("LOG_DIR")
-                                .takes_value(true)
-                                .validator(is_parsable::<PathBuf>)
-                                .help(
-                                    "Directory to write status updates to. If not \
-                                provided, status updates will not be written.
-                                ",
-                                ),
-                        )
-                        .arg(
-                            Arg::with_name("tags")
-                                .long("tags")
-                                .value_name("TAGS")
-                                .multiple(true)
-                                .takes_value(true)
-                                .validator(is_valid_tag)
-                                .help(
-                                    "Specify additional tags for the file as \
-                                    <NAME>:<VALUE>, separated by spaces. Content-Type tag \
-                                    will be inferred automatically so not necessary so \
-                                    include here.",
-                                ),
-                        ),
-                )
-                .subcommand(
-                    SubCommand::with_name("status")
-                        .about("Check transaction status.")
-                        .arg(
-                            Arg::with_name("id")
-                                .value_name("ID")
-                                .takes_value(true)
-                                .help("Id of transaction to check status on."),
-                        ),
-                ),
         );
     app_matches
 }
@@ -936,43 +797,6 @@ async fn main() {
             bulk_signers.push(signer);
 
             command_create_token(&config, &data)
-        }
-
-        ("arweave", Some(arg_matches)) => {
-            let keypair_path = arg_matches.value_of("keypair_path").unwrap();
-
-            let arweave = Arweave::from_keypair_path(PathBuf::from(keypair_path), None)
-                .await
-                .unwrap();
-            let (sub_sub_command, sub_arg_matches) = arg_matches.subcommand();
-
-            match (sub_sub_command, sub_arg_matches) {
-                ("price", Some(sub_sub_arg_matches)) => {
-                    let bytes = value_t!(sub_sub_arg_matches, "bytes", usize).unwrap();
-                    command_price(&arweave, &bytes, &config).await
-                }
-                ("get-transaction", Some(sub_sub_arg_matches)) => {
-                    let id = sub_sub_arg_matches.value_of("id").unwrap();
-                    command_get_transaction(&arweave, id).await
-                }
-                ("wallet-balance", Some(sub_sub_arg_matches)) => {
-                    let wallet_address = sub_sub_arg_matches
-                        .value_of("wallet_address")
-                        .map(|v| v.to_string());
-                    command_wallet_balance(&arweave, &config, wallet_address).await
-                }
-                ("file-upload", Some(sub_sub_arg_matches)) => {
-                    let file_path = sub_sub_arg_matches.value_of("file_path").unwrap();
-                    let log_dir = sub_sub_arg_matches.value_of("log_dir");
-                    let tags = get_tags_vec(arg_matches.values_of("tags"));
-                    command_file_upload(&arweave, &config, file_path, log_dir, tags).await
-                }
-                ("status", Some(sub_sub_arg_matches)) => {
-                    let id = sub_sub_arg_matches.value_of("id").unwrap();
-                    command_check_status(&arweave, id).await
-                }
-                _ => unreachable!(),
-            }
         }
 
         _ => unreachable!(),
@@ -1471,87 +1295,6 @@ fn command_mint(
         )?]
     };
     Ok(Some((0, vec![instructions])))
-}
-
-async fn command_price(arweave: &Arweave, bytes: &usize, config: &Config) -> CommandResult {
-    let (winstons_per_bytes, usd_per_ar) = arweave.get_price(bytes).await?;
-    let usd_per_kb = (&winstons_per_bytes * &usd_per_ar).to_f32().unwrap() / 1e14_f32;
-
-    println_display(
-        config,
-        format!(
-            "The price to upload {} bytes to {} is {} {} (${}).",
-            bytes, arweave.name, winstons_per_bytes, arweave.units, usd_per_kb
-        ),
-    );
-    Ok(None)
-}
-
-async fn command_get_transaction(arweave: &Arweave, id: &str) -> CommandResult {
-    let id = Base64::from_str(id)?;
-    let transaction = arweave.get_transaction(&id).await?;
-    println!("Fetched transaction {}", transaction.id);
-    Ok(None)
-}
-
-async fn command_check_status(arweave: &Arweave, id: &str) -> CommandResult {
-    let id = Base64::from_str(id)?;
-    let status = arweave.get_raw_status(&id).await?;
-    println!("Status for transaction id {}: {:?}", &id, &status);
-    Ok(None)
-}
-
-async fn command_wallet_balance(
-    arweave: &Arweave,
-    config: &Config,
-    wallet_address: Option<String>,
-) -> CommandResult {
-    let mb = u32::pow(1024, 2) as usize;
-    let result = tokio::join!(
-        arweave.get_wallet_balance(wallet_address),
-        arweave.get_price(&mb)
-    );
-    let balance = result.0?;
-    let (winstons_per_kb, usd_per_ar) = result.1?;
-
-    let balance_usd = &balance / &WINSTONS_PER_AR * &usd_per_ar;
-
-    let usd_per_kb = (&winstons_per_kb * &usd_per_ar).to_f32().unwrap() / 1e14_f32;
-
-    println_display(
-        config,
-        format!(
-            "Wallet balance is {} {units} (${balance_usd}). At the current price of {price} {units} (${usd_price:.4}) per MB, you can upload {max} MB of data.",
-            &balance,
-            units = arweave.units,
-            max = &balance / &winstons_per_kb,
-            price = &winstons_per_kb,
-            balance_usd = balance_usd.to_f32().unwrap() / 100_f32,
-            usd_price = usd_per_kb
-        ),
-    );
-    Ok(None)
-}
-
-async fn command_file_upload(
-    arweave: &Arweave,
-    config: &Config,
-    file_path: &str,
-    log_dir: Option<&str>,
-    tags: Option<Vec<Tag>>,
-) -> CommandResult {
-    let status = arweave
-        .upload_file_from_path(
-            PathBuf::from(file_path),
-            log_dir.map(|v| PathBuf::from(v)),
-            tags,
-            None,
-            None,
-        )
-        .await?;
-
-    println_display(config, format!("{:?}", status));
-    Ok(None)
 }
 
 #[cfg(test)]

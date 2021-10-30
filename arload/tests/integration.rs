@@ -1,9 +1,11 @@
-use arweave_rs::{
+use arload::{
+    status::{OutputFormat, OutputHeader, Status, StatusCode},
     transaction::Tag,
+    upload_files_stream,
     utils::{TempDir, TempFrom},
-    Arweave, Error, Methods as ArewaveMethods, Status, StatusCode,
+    Arweave, Error, Methods as ArewaveMethods,
 };
-use futures::future::try_join_all;
+use futures::{future::try_join_all, StreamExt};
 use glob::glob;
 use std::{iter, path::PathBuf, time::Duration};
 use tokio::time::sleep;
@@ -300,5 +302,33 @@ async fn test_filter_statuses() -> Result<(), Error> {
         .filter_statuses(paths_iter, log_dir.clone(), StatusCode::Confirmed, None)
         .await?;
     assert_eq!(confirmed.len(), 10);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_upload_files_stream() -> Result<(), Error> {
+    let arweave = get_arweave().await?;
+    // Don't run if test server is not running.
+    if let Err(_) = reqwest::get(arweave.base_url.join("info")?).await {
+        println!("Test server not running.");
+        return Ok(());
+    }
+
+    let _ = mine(&arweave).await?;
+    let paths_iter = glob("tests/fixtures/[0-9]*.png")?.filter_map(Result::ok);
+
+    let temp_log_dir = TempDir::from_str("../target/tmp/").await?;
+    let _log_dir = temp_log_dir.0.clone();
+
+    let mut _tags_iter = Some(iter::repeat(Some(Vec::<Tag>::new())));
+    _tags_iter = None;
+
+    let mut stream = upload_files_stream(&arweave, paths_iter, None, None, None, 3);
+
+    let output_format = OutputFormat::JsonCompact;
+    println!("{}", Status::header_string(&output_format));
+    while let Some(Ok(status)) = stream.next().await {
+        print!("{}", output_format.formatted_string(&status));
+    }
     Ok(())
 }
