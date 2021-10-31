@@ -17,9 +17,9 @@ pub struct RawStatus {
 pub enum StatusCode {
     #[default]
     Submitted,
-    NotFound,
     Pending,
     Confirmed,
+    NotFound,
 }
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Status {

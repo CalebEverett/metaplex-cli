@@ -7,13 +7,14 @@ use arload::{
 };
 use futures::{future::try_join_all, StreamExt};
 use glob::glob;
-use std::{iter, path::PathBuf, time::Duration};
+use std::{iter, path::PathBuf, str::FromStr, time::Duration};
 use tokio::time::sleep;
+use url::Url;
 
 async fn get_arweave() -> Result<Arweave, Error> {
     let keypair_path =
         "tests/fixtures/arweave-keyfile-MlV6DeOtRmakDOf6vgOBlif795tcWimgyPsYYNQ8q1Y.json";
-    let base_url = "http://localhost:1984/";
+    let base_url = Url::from_str("http://localhost:1984/")?;
     let arweave = Arweave::from_keypair_path(PathBuf::from(keypair_path), Some(base_url)).await?;
     Ok(arweave)
 }
@@ -228,7 +229,12 @@ async fn test_filter_statuses() -> Result<(), Error> {
     // There should be 5 StatusCode::Pending.
     let paths_iter = glob("tests/fixtures/[0-4].png")?.filter_map(Result::ok);
     let pending = arweave
-        .filter_statuses(paths_iter, log_dir.clone(), StatusCode::Pending, None)
+        .filter_statuses(
+            paths_iter,
+            log_dir.clone(),
+            Some(vec![StatusCode::Pending]),
+            None,
+        )
         .await?;
     assert_eq!(pending.len(), 5);
     println!("{:?}", pending);
@@ -241,7 +247,12 @@ async fn test_filter_statuses() -> Result<(), Error> {
     let _updated_statuses = arweave.update_statuses(paths_iter, log_dir.clone()).await?;
     let paths_iter = glob("tests/fixtures/[0-4].png")?.filter_map(Result::ok);
     let confirmed = arweave
-        .filter_statuses(paths_iter, log_dir.clone(), StatusCode::Confirmed, None)
+        .filter_statuses(
+            paths_iter,
+            log_dir.clone(),
+            Some(vec![StatusCode::Confirmed]),
+            None,
+        )
         .await?;
     assert_eq!(confirmed.len(), 5);
     println!("{:?}", confirmed);
@@ -281,7 +292,12 @@ async fn test_filter_statuses() -> Result<(), Error> {
     // With five not found
     let paths_iter = glob("tests/fixtures/[0-9].png")?.filter_map(Result::ok);
     let not_found = arweave
-        .filter_statuses(paths_iter, log_dir.clone(), StatusCode::NotFound, None)
+        .filter_statuses(
+            paths_iter,
+            log_dir.clone(),
+            Some(vec![StatusCode::NotFound]),
+            None,
+        )
         .await?;
     assert_eq!(not_found.len(), 5);
 
@@ -299,7 +315,12 @@ async fn test_filter_statuses() -> Result<(), Error> {
 
     let paths_iter = glob("tests/fixtures/[0-9].png")?.filter_map(Result::ok);
     let confirmed = arweave
-        .filter_statuses(paths_iter, log_dir.clone(), StatusCode::Confirmed, None)
+        .filter_statuses(
+            paths_iter,
+            log_dir.clone(),
+            Some(vec![StatusCode::Confirmed]),
+            None,
+        )
         .await?;
     assert_eq!(confirmed.len(), 10);
     Ok(())

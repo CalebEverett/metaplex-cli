@@ -59,6 +59,20 @@ where
         .buffer_unordered(buffer)
 }
 
+pub fn update_statuses_stream<'a, IP>(
+    arweave: &'a Arweave,
+    paths_iter: IP,
+    log_dir: PathBuf,
+    buffer: usize,
+) -> impl Stream<Item = Result<Status, Error>> + 'a
+where
+    IP: Iterator<Item = PathBuf> + Send + Sync + 'a,
+{
+    stream::iter(paths_iter)
+        .map(move |p| arweave.update_status(p, log_dir.clone()))
+        .buffer_unordered(buffer)
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 struct OraclePrice {
     pub arweave: OraclePricePair,
@@ -71,7 +85,7 @@ struct OraclePricePair {
 
 #[async_trait]
 pub trait Methods<T> {
-    async fn from_keypair_path(keypair_path: PathBuf, base_url: Option<&str>) -> Result<T, Error>;
+    async fn from_keypair_path(keypair_path: PathBuf, base_url: Option<Url>) -> Result<T, Error>;
 
     async fn get_wallet_balance(&self, wallet_address: Option<String>) -> Result<BigUint, Error>;
 
@@ -144,7 +158,7 @@ pub trait Methods<T> {
         &self,
         paths_iter: IP,
         log_dir: PathBuf,
-        status: StatusCode,
+        statuses: Option<Vec<StatusCode>>,
         min_confirms: Option<u64>,
     ) -> Result<Vec<Status>, Error>
     where
@@ -155,12 +169,12 @@ pub trait Methods<T> {
 impl Methods<Arweave> for Arweave {
     async fn from_keypair_path(
         keypair_path: PathBuf,
-        base_url: Option<&str>,
+        base_url: Option<Url>,
     ) -> Result<Arweave, Error> {
         Ok(Arweave {
             name: String::from("arweave"),
             units: String::from("winstons"),
-            base_url: Url::parse(base_url.unwrap_or("https://arweave.net/"))?,
+            base_url: base_url.unwrap_or(Url::from_str("https://arweave.net/")?),
             crypto: crypto::Provider::from_keypair_path(keypair_path).await?,
         })
     }
@@ -448,38 +462,62 @@ impl Methods<Arweave> for Arweave {
         Ok(statuses)
     }
 
-    /// Filters saved Status objects by status and number of confirmations.
+    /// Filters saved Status objects by status and/or number of confirmations. Return
+    /// all statuses if no status codes or minimum confirmations are provided.
     ///
     /// If there is no raw status object and min_confirms is passed, it
     /// assumes there are zero confirms. This is designed to be used to
-    /// confirm all files have a confirmed status and to collect the
+    /// determine whether all files have a confirmed status and to collect the
     /// paths of the files that need to be re-uploaded.
     async fn filter_statuses<IP>(
         &self,
         paths_iter: IP,
         log_dir: PathBuf,
-        status: StatusCode,
+        statuses: Option<Vec<StatusCode>>,
         min_confirms: Option<u64>,
     ) -> Result<Vec<Status>, Error>
     where
         IP: Iterator<Item = PathBuf> + Send,
     {
         let all_statuses = self.read_statuses(paths_iter, log_dir).await?;
-        let filtered = all_statuses
-            .into_iter()
-            .filter(|s| {
-                if let Some(min_confirms) = min_confirms {
-                    let confirms = if let Some(raw_status) = &s.raw_status {
-                        raw_status.number_of_confirmations
-                    } else {
-                        0
-                    };
-                    (s.status == status) & (confirms >= min_confirms)
-                } else {
-                    s.status == status
-                }
-            })
-            .collect();
+
+        let filtered = if let Some(statuses) = statuses {
+            if let Some(min_confirms) = min_confirms {
+                all_statuses
+                    .into_iter()
+                    .filter(|s| {
+                        let confirms = if let Some(raw_status) = &s.raw_status {
+                            raw_status.number_of_confirmations
+                        } else {
+                            0
+                        };
+                        (&statuses.iter().any(|c| c == &s.status)) & (confirms >= min_confirms)
+                    })
+                    .collect()
+            } else {
+                all_statuses
+                    .into_iter()
+                    .filter(|s| statuses.iter().any(|c| c == &s.status))
+                    .collect()
+            }
+        } else {
+            if let Some(min_confirms) = min_confirms {
+                all_statuses
+                    .into_iter()
+                    .filter(|s| {
+                        let confirms = if let Some(raw_status) = &s.raw_status {
+                            raw_status.number_of_confirmations
+                        } else {
+                            0
+                        };
+                        confirms >= min_confirms
+                    })
+                    .collect()
+            } else {
+                all_statuses
+            }
+        };
+
         Ok(filtered)
     }
 }
