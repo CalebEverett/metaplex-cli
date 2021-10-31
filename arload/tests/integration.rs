@@ -1,17 +1,20 @@
-use arweave_rs::{
+use arload::{
+    status::{OutputFormat, OutputHeader, Status, StatusCode},
     transaction::Tag,
+    upload_files_stream,
     utils::{TempDir, TempFrom},
-    Arweave, Error, Methods as ArewaveMethods, Status, StatusCode,
+    Arweave, Error, Methods as ArewaveMethods,
 };
-use futures::future::try_join_all;
+use futures::{future::try_join_all, StreamExt};
 use glob::glob;
-use std::{iter, path::PathBuf, time::Duration};
+use std::{iter, path::PathBuf, str::FromStr, time::Duration};
 use tokio::time::sleep;
+use url::Url;
 
 async fn get_arweave() -> Result<Arweave, Error> {
     let keypair_path =
         "tests/fixtures/arweave-keyfile-MlV6DeOtRmakDOf6vgOBlif795tcWimgyPsYYNQ8q1Y.json";
-    let base_url = "http://localhost:1984/";
+    let base_url = Url::from_str("http://localhost:1984/")?;
     let arweave = Arweave::from_keypair_path(PathBuf::from(keypair_path), Some(base_url)).await?;
     Ok(arweave)
 }
@@ -226,7 +229,12 @@ async fn test_filter_statuses() -> Result<(), Error> {
     // There should be 5 StatusCode::Pending.
     let paths_iter = glob("tests/fixtures/[0-4].png")?.filter_map(Result::ok);
     let pending = arweave
-        .filter_statuses(paths_iter, log_dir.clone(), StatusCode::Pending, None)
+        .filter_statuses(
+            paths_iter,
+            log_dir.clone(),
+            Some(vec![StatusCode::Pending]),
+            None,
+        )
         .await?;
     assert_eq!(pending.len(), 5);
     println!("{:?}", pending);
@@ -239,7 +247,12 @@ async fn test_filter_statuses() -> Result<(), Error> {
     let _updated_statuses = arweave.update_statuses(paths_iter, log_dir.clone()).await?;
     let paths_iter = glob("tests/fixtures/[0-4].png")?.filter_map(Result::ok);
     let confirmed = arweave
-        .filter_statuses(paths_iter, log_dir.clone(), StatusCode::Confirmed, None)
+        .filter_statuses(
+            paths_iter,
+            log_dir.clone(),
+            Some(vec![StatusCode::Confirmed]),
+            None,
+        )
         .await?;
     assert_eq!(confirmed.len(), 5);
     println!("{:?}", confirmed);
@@ -279,7 +292,12 @@ async fn test_filter_statuses() -> Result<(), Error> {
     // With five not found
     let paths_iter = glob("tests/fixtures/[0-9].png")?.filter_map(Result::ok);
     let not_found = arweave
-        .filter_statuses(paths_iter, log_dir.clone(), StatusCode::NotFound, None)
+        .filter_statuses(
+            paths_iter,
+            log_dir.clone(),
+            Some(vec![StatusCode::NotFound]),
+            None,
+        )
         .await?;
     assert_eq!(not_found.len(), 5);
 
@@ -297,8 +315,41 @@ async fn test_filter_statuses() -> Result<(), Error> {
 
     let paths_iter = glob("tests/fixtures/[0-9].png")?.filter_map(Result::ok);
     let confirmed = arweave
-        .filter_statuses(paths_iter, log_dir.clone(), StatusCode::Confirmed, None)
+        .filter_statuses(
+            paths_iter,
+            log_dir.clone(),
+            Some(vec![StatusCode::Confirmed]),
+            None,
+        )
         .await?;
     assert_eq!(confirmed.len(), 10);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_upload_files_stream() -> Result<(), Error> {
+    let arweave = get_arweave().await?;
+    // Don't run if test server is not running.
+    if let Err(_) = reqwest::get(arweave.base_url.join("info")?).await {
+        println!("Test server not running.");
+        return Ok(());
+    }
+
+    let _ = mine(&arweave).await?;
+    let paths_iter = glob("tests/fixtures/[0-9]*.png")?.filter_map(Result::ok);
+
+    let temp_log_dir = TempDir::from_str("../target/tmp/").await?;
+    let _log_dir = temp_log_dir.0.clone();
+
+    let mut _tags_iter = Some(iter::repeat(Some(Vec::<Tag>::new())));
+    _tags_iter = None;
+
+    let mut stream = upload_files_stream(&arweave, paths_iter, None, None, None, 3);
+
+    let output_format = OutputFormat::JsonCompact;
+    println!("{}", Status::header_string(&output_format));
+    while let Some(Ok(status)) = stream.next().await {
+        print!("{}", output_format.formatted_string(&status));
+    }
     Ok(())
 }

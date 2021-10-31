@@ -3,7 +3,8 @@
 use crate::error::ArweaveError;
 use async_trait::async_trait;
 use blake3;
-use futures::future::try_join_all;
+use chrono::Utc;
+use futures::{future::try_join_all, stream, Stream, StreamExt};
 use infer;
 use log::debug;
 use num_bigint::BigUint;
@@ -13,25 +14,25 @@ use reqwest::{
     StatusCode as ResponseStatusCode,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    path::PathBuf,
-    str::FromStr,
-    time::{Duration, SystemTime},
-};
+use std::{collections::HashMap, fmt::Write, path::PathBuf, str::FromStr};
 use tokio::fs;
 use url::Url;
 
 pub mod crypto;
 pub mod error;
 pub mod merkle;
+pub mod status;
 pub mod transaction;
 pub mod utils;
 
 use crypto::Methods as CryptoMethods;
 use merkle::{generate_data_root, generate_leaves, resolve_proofs};
+use status::{Status, StatusCode};
 use transaction::{Base64, FromStrs, Tag, Transaction};
 
 pub type Error = ArweaveError;
+
+pub const WINSTONS_PER_AR: u64 = 1000000000000;
 
 pub struct Arweave {
     pub name: String,
@@ -40,52 +41,36 @@ pub struct Arweave {
     pub crypto: crypto::Provider,
 }
 
-#[allow(dead_code)]
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-pub struct RawStatus {
-    block_height: u64,
-    block_indep_hash: Base64,
-    number_of_confirmations: u64,
+pub fn upload_files_stream<'a, IP>(
+    arweave: &'a Arweave,
+    paths_iter: IP,
+    log_dir: Option<PathBuf>,
+    last_tx: Option<Base64>,
+    reward: Option<u64>,
+    buffer: usize,
+) -> impl Stream<Item = Result<Status, Error>> + 'a
+where
+    IP: Iterator<Item = PathBuf> + Send + Sync + 'a,
+{
+    stream::iter(paths_iter)
+        .map(move |p| {
+            arweave.upload_file_from_path(p, log_dir.clone(), None, last_tx.clone(), reward)
+        })
+        .buffer_unordered(buffer)
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
-pub enum StatusCode {
-    #[default]
-    Submitted,
-    NotFound,
-    Pending,
-    Confirmed,
-}
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-pub struct Status {
-    pub id: Base64,
-    pub status: StatusCode,
-    pub file_path: Option<PathBuf>,
-    pub created_at: Duration,
-    pub last_modified: Duration,
-    pub reward: u64,
-    #[serde(flatten)]
-    pub raw_status: Option<RawStatus>,
-}
-
-impl Default for Status {
-    fn default() -> Self {
-        Self {
-            id: Base64(vec![]),
-            status: StatusCode::default(),
-            file_path: None,
-            created_at: now(),
-            last_modified: now(),
-            reward: 0,
-            raw_status: None,
-        }
-    }
-}
-
-pub fn now() -> Duration {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
+pub fn update_statuses_stream<'a, IP>(
+    arweave: &'a Arweave,
+    paths_iter: IP,
+    log_dir: PathBuf,
+    buffer: usize,
+) -> impl Stream<Item = Result<Status, Error>> + 'a
+where
+    IP: Iterator<Item = PathBuf> + Send + Sync + 'a,
+{
+    stream::iter(paths_iter)
+        .map(move |p| arweave.update_status(p, log_dir.clone()))
+        .buffer_unordered(buffer)
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -100,11 +85,11 @@ struct OraclePricePair {
 
 #[async_trait]
 pub trait Methods<T> {
-    async fn from_keypair_path(keypair_path: PathBuf, base_url: Option<&str>) -> Result<T, Error>;
+    async fn from_keypair_path(keypair_path: PathBuf, base_url: Option<Url>) -> Result<T, Error>;
 
     async fn get_wallet_balance(&self, wallet_address: Option<String>) -> Result<BigUint, Error>;
 
-    async fn get_price(&self, bytes: &usize) -> Result<(BigUint, BigUint), Error>;
+    async fn get_price(&self, bytes: &u64) -> Result<(BigUint, BigUint), Error>;
 
     async fn get_transaction(&self, id: &Base64) -> Result<Transaction, Error>;
 
@@ -135,6 +120,10 @@ pub trait Methods<T> {
         paths_iter: IP,
         log_dir: PathBuf,
     ) -> Result<Vec<Status>, Error>
+    where
+        IP: Iterator<Item = PathBuf> + Send;
+
+    async fn status_summary<IP>(&self, paths_iter: IP, log_dir: PathBuf) -> Result<String, Error>
     where
         IP: Iterator<Item = PathBuf> + Send;
 
@@ -173,7 +162,7 @@ pub trait Methods<T> {
         &self,
         paths_iter: IP,
         log_dir: PathBuf,
-        status: StatusCode,
+        statuses: Option<Vec<StatusCode>>,
         min_confirms: Option<u64>,
     ) -> Result<Vec<Status>, Error>
     where
@@ -184,12 +173,12 @@ pub trait Methods<T> {
 impl Methods<Arweave> for Arweave {
     async fn from_keypair_path(
         keypair_path: PathBuf,
-        base_url: Option<&str>,
+        base_url: Option<Url>,
     ) -> Result<Arweave, Error> {
         Ok(Arweave {
             name: String::from("arweave"),
             units: String::from("winstons"),
-            base_url: Url::parse(base_url.unwrap_or("https://arweave.net/"))?,
+            base_url: base_url.unwrap_or(Url::from_str("https://arweave.net/")?),
             crypto: crypto::Provider::from_keypair_path(keypair_path).await?,
         })
     }
@@ -210,7 +199,7 @@ impl Methods<Arweave> for Arweave {
 
     /// Returns price of uploading data to the network in winstons and usd per AR
     /// as a BigUint with two decimals.
-    async fn get_price(&self, bytes: &usize) -> Result<(BigUint, BigUint), Error> {
+    async fn get_price(&self, bytes: &u64) -> Result<(BigUint, BigUint), Error> {
         let url = self.base_url.join("price/")?.join(&bytes.to_string())?;
         let winstons_per_bytes = reqwest::get(url).await?.json::<u64>().await?;
         let winstons_per_bytes = BigUint::from(winstons_per_bytes);
@@ -273,8 +262,9 @@ impl Methods<Arweave> for Arweave {
         };
 
         // Fetch and set reward if not provided (primarily for testing).
+        let bytes_len: u64 = data.len() as u64;
         let reward = reward.unwrap_or({
-            let (winstons_per_bytes, _) = self.get_price(&data.len()).await?;
+            let (winstons_per_bytes, _) = self.get_price(&bytes_len).await?;
             winstons_per_bytes.to_u64_digits()[0]
         });
 
@@ -392,10 +382,44 @@ impl Methods<Arweave> for Arweave {
         try_join_all(paths_iter.map(|p| self.read_status(p, log_dir.clone()))).await
     }
 
+    async fn status_summary<IP>(&self, paths_iter: IP, log_dir: PathBuf) -> Result<String, Error>
+    where
+        IP: Iterator<Item = PathBuf> + Send,
+    {
+        let statuses = self.read_statuses(paths_iter, log_dir).await?;
+        let status_counts: HashMap<StatusCode, u32> =
+            statuses
+                .into_iter()
+                .fold(HashMap::new(), |mut map, status| {
+                    *map.entry(status.status).or_insert(0) += 1;
+                    map
+                });
+
+        let mut total = 0;
+        let mut output = String::new();
+        writeln!(output, " {:<15}  {:>10}", "status", "count")?;
+        writeln!(output, "{:-<29}", "")?;
+        for k in vec![
+            StatusCode::Submitted,
+            StatusCode::Pending,
+            StatusCode::NotFound,
+            StatusCode::Confirmed,
+        ] {
+            let v = status_counts.get(&k).unwrap_or(&0);
+            writeln!(output, " {:<16} {:>10}", &k.to_string(), v)?;
+            total += v;
+        }
+
+        writeln!(output, "{:-<29}", "")?;
+        writeln!(output, " {:<15}  {:>10}", "Total", total)?;
+
+        Ok(output)
+    }
+
     async fn update_status(&self, file_path: PathBuf, log_dir: PathBuf) -> Result<Status, Error> {
         let mut status = self.read_status(file_path, log_dir.clone()).await?;
         let resp = self.get_raw_status(&status.id).await?;
-        status.last_modified = now();
+        status.last_modified = Utc::now();
         match resp.status() {
             ResponseStatusCode::OK => {
                 let resp_string = resp.text().await?;
@@ -477,38 +501,62 @@ impl Methods<Arweave> for Arweave {
         Ok(statuses)
     }
 
-    /// Filters saved Status objects by status and number of confirmations.
+    /// Filters saved Status objects by status and/or number of confirmations. Return
+    /// all statuses if no status codes or minimum confirmations are provided.
     ///
     /// If there is no raw status object and min_confirms is passed, it
     /// assumes there are zero confirms. This is designed to be used to
-    /// confirm all files have a confirmed status and to collect the
+    /// determine whether all files have a confirmed status and to collect the
     /// paths of the files that need to be re-uploaded.
     async fn filter_statuses<IP>(
         &self,
         paths_iter: IP,
         log_dir: PathBuf,
-        status: StatusCode,
+        statuses: Option<Vec<StatusCode>>,
         min_confirms: Option<u64>,
     ) -> Result<Vec<Status>, Error>
     where
         IP: Iterator<Item = PathBuf> + Send,
     {
         let all_statuses = self.read_statuses(paths_iter, log_dir).await?;
-        let filtered = all_statuses
-            .into_iter()
-            .filter(|s| {
-                if let Some(min_confirms) = min_confirms {
-                    let confirms = if let Some(raw_status) = &s.raw_status {
-                        raw_status.number_of_confirmations
-                    } else {
-                        0
-                    };
-                    (s.status == status) & (confirms >= min_confirms)
-                } else {
-                    s.status == status
-                }
-            })
-            .collect();
+
+        let filtered = if let Some(statuses) = statuses {
+            if let Some(min_confirms) = min_confirms {
+                all_statuses
+                    .into_iter()
+                    .filter(|s| {
+                        let confirms = if let Some(raw_status) = &s.raw_status {
+                            raw_status.number_of_confirmations
+                        } else {
+                            0
+                        };
+                        (&statuses.iter().any(|c| c == &s.status)) & (confirms >= min_confirms)
+                    })
+                    .collect()
+            } else {
+                all_statuses
+                    .into_iter()
+                    .filter(|s| statuses.iter().any(|c| c == &s.status))
+                    .collect()
+            }
+        } else {
+            if let Some(min_confirms) = min_confirms {
+                all_statuses
+                    .into_iter()
+                    .filter(|s| {
+                        let confirms = if let Some(raw_status) = &s.raw_status {
+                            raw_status.number_of_confirmations
+                        } else {
+                            0
+                        };
+                        confirms >= min_confirms
+                    })
+                    .collect()
+            } else {
+                all_statuses
+            }
+        };
+
         Ok(filtered)
     }
 }

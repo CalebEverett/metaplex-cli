@@ -7,12 +7,10 @@ license = "Apache-2.0"
 repository = "https://github.com/CalebEverett/metaplex-cli"
 
 [dependencies]
-# arrayref = "0.3.6"
-arweave_rs = { path = "../arweave_rs" }
 borsh = "0.9.1"
 clap = "2.33.3"
 console = "0.15.0"
-infer = { version = "0.5.0", default-features = false }
+futures = "0.3.17"
 indicatif = "0.16.2"
 log = "0.4.14"
 metaplex-token-metadata = { git = "https://github.com/metaplex-foundation/metaplex", features = [ "no-entrypoint" ] }
@@ -32,6 +30,6 @@ spl-token = { version = "3.2.0", features = [ "no-entrypoint" ] }
 spl-associated-token-account = "1.0.3"
 spl-memo = { version = "3.0.1", features = ["no-entrypoint"] }
 thiserror = "1.0.30"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 url = "2.2.2"
 
