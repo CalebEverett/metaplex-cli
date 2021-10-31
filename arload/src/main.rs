@@ -7,8 +7,7 @@ use arload::{
 };
 
 use clap::{
-    self, crate_description, crate_name, crate_version, value_t, App, AppSettings, Arg, SubCommand,
-    Values,
+    self, crate_description, crate_name, crate_version, App, AppSettings, Arg, SubCommand, Values,
 };
 use futures::StreamExt;
 use glob::glob;
@@ -88,10 +87,10 @@ fn get_output_format(output: &str) -> OutputFormat {
 
 fn get_status_code(output: &str) -> StatusCode {
     match output {
-        "submitted" => StatusCode::Submitted,
-        "pending" => StatusCode::Pending,
-        "confirmed" => StatusCode::Confirmed,
-        "not_found" => StatusCode::NotFound,
+        "Submitted" => StatusCode::Submitted,
+        "Pending" => StatusCode::Pending,
+        "Confirmed" => StatusCode::Confirmed,
+        "NotFound" => StatusCode::NotFound,
         _ => StatusCode::NotFound,
     }
 }
@@ -110,7 +109,6 @@ fn get_app() -> App<'static, 'static> {
                 .env("AR_BASE_URL")
                 .help(
                     "Base url for network requests. \
-                    Defaults to https://arweave.net/. \
                     Can also be set with AR_BASE_URL environment \
                     variable",
                 ),
@@ -144,13 +142,16 @@ fn get_app() -> App<'static, 'static> {
                 .global(true)
                 .takes_value(true)
                 .validator(is_parsable::<usize>)
-                .help("Sets the maximum number of concurrent network requests."),
+                .help(
+                    "Sets the maximum number of concurrent network requests. \
+                Defaults to 1.",
+                ),
         )
         .subcommand(
-            SubCommand::with_name("get-cost")
+            SubCommand::with_name("estimate")
                 .about(
-                    "Returns the estimated cost of uploading the file(s) \
-                matching the provided glob.",
+                    "Prints the estimated cost of uploading file(s) \
+                matching provided glob.",
                 )
                 .arg(
                     Arg::with_name("glob")
@@ -165,33 +166,34 @@ fn get_app() -> App<'static, 'static> {
                 ),
         )
         .subcommand(
-            SubCommand::with_name("get-wallet-balance")
-                .about("Returns the balance of a wallet.")
+            SubCommand::with_name("wallet-balance")
+                .about("Prints the balance of a wallet.")
                 .arg(
                     Arg::with_name("wallet_address")
                         .value_name("WALLET_ADDRESS")
                         .takes_value(true)
                         .validator(is_parsable::<Base64>)
                         .help(
-                            "Specify address of the wallet to the balance of.
-                            Defaults to address of keypair.",
+                            "Specify the address of the wallet to print \
+                            the balance for. Defaults to the keypair
+                            specified in `keypair_path`.",
                         ),
                 ),
         )
         .subcommand(
             SubCommand::with_name("get-transaction")
-                .about("Fetches transaction from the network.")
+                .about("Gets a transaction from the network and writes to disk as a file.")
                 .arg(
                     Arg::with_name("id")
                         .value_name("ID")
                         .takes_value(true)
                         .validator(is_parsable::<Base64>)
-                        .help("Id of data to return from storage."),
+                        .help("Specify the id of the transaction to retrieve."),
                 ),
         )
         .subcommand(
             SubCommand::with_name("upload")
-                .about("Uploads one or more files that match provided glob.")
+                .about("Uploads one or more files that match the specified glob.")
                 .arg(
                     Arg::with_name("glob")
                         .value_name("GLOB")
@@ -234,21 +236,18 @@ fn get_app() -> App<'static, 'static> {
         )
         .subcommand(
             SubCommand::with_name("get-raw-status")
-                .about("Get raw transaction status from network.")
+                .about("Prints the raw status of a transaction from the network.")
                 .arg(
                     Arg::with_name("id")
                         .value_name("ID")
                         .takes_value(true)
                         .required(true)
-                        .help("Id of transaction to check status on."),
+                        .help("Specify the id of the transaction to print the status for."),
                 ),
         )
         .subcommand(
-            SubCommand::with_name("update-statuses")
-                .about(
-                    "Query the network to fetch updated transaction status and \
-                update stored transaction status on disk.",
-                )
+            SubCommand::with_name("update-status")
+                .about("Updates statuses stored in `log_dir` from the network.")
                 .arg(
                     Arg::with_name("glob")
                         .value_name("GLOB")
@@ -275,11 +274,7 @@ fn get_app() -> App<'static, 'static> {
         )
         .subcommand(
             SubCommand::with_name("status-report")
-                .about("Reports on statuses stored on disk.")
-                .help(
-                    "Report on statuses previously written to disk. Filters statuses
-                by `glob` if provided.",
-                )
+                .about("Prints a summary of statuses stored in `log_dir`.")
                 .arg(
                     Arg::with_name("glob")
                         .value_name("GLOB")
@@ -305,18 +300,14 @@ fn get_app() -> App<'static, 'static> {
                 ),
         )
         .subcommand(
-            SubCommand::with_name("upload-filtered")
-                .about("Re-uploads filtered files based on filtered statuses.")
+            SubCommand::with_name("upload-filter")
+                .about("Re-uploads files that meet filter criteria.")
                 .arg(
                     Arg::with_name("glob")
                         .value_name("GLOB")
                         .takes_value(true)
                         .required(true)
-                        .help(
-                            "Glob pattern of files to be uploaded. \
-                        Run glob-estimate to see how many files will be \
-                        uploaded, total size and cost.",
-                        ),
+                        .help("Glob pattern of files to be uploaded."),
                 )
                 .arg(
                     Arg::with_name("log_dir")
@@ -332,18 +323,18 @@ fn get_app() -> App<'static, 'static> {
                         ),
                 )
                 .arg(
-                    Arg::with_name("status-code")
-                        .long("status_code")
-                        .value_name("STATUS_CODE")
+                    Arg::with_name("statuses")
+                        .long("statuses")
+                        .value_name("STATUSES")
                         .takes_value(true)
                         .multiple(true)
-                        .possible_values(&["submitted", "pending", "confirmed", "not_found"])
-                        .help("Status codes to filter by."),
+                        .possible_values(&["Submitted", "Pending", "Confirmed", "NotFound"])
+                        .help("Status codes to filter by. Multiple Ok."),
                 ),
         )
         .subcommand(
-            SubCommand::with_name("list-statuses")
-                .about("Lists statuses as currently recorded on disk.")
+            SubCommand::with_name("list-status")
+                .about("Lists statuses as currently store in `log_dir`.")
                 .help("")
                 .arg(
                     Arg::with_name("glob")
@@ -375,7 +366,7 @@ fn get_app() -> App<'static, 'static> {
                         .value_name("STATUSES")
                         .takes_value(true)
                         .multiple(true)
-                        .possible_values(&["submitted", "pending", "confirmed", "not_found"])
+                        .possible_values(&["Submitted", "Pending", "Confirmed", "NotFound"])
                         .help("Status codes to filter by. Multiple Ok."),
                 )
                 .arg(
@@ -405,11 +396,11 @@ async fn main() -> CommandResult {
     let (sub_command, arg_matches) = app_matches.subcommand();
 
     match (sub_command, arg_matches) {
-        ("get-cost", Some(sub_arg_matches)) => {
-            let bytes = value_t!(sub_arg_matches, "bytes", usize).unwrap();
-            command_price(&arweave, &bytes).await
+        ("estimate", Some(sub_arg_matches)) => {
+            let glob_str = sub_arg_matches.value_of("glob").unwrap();
+            command_get_cost(&arweave, glob_str).await
         }
-        ("get-wallet-balance", Some(sub_arg_matches)) => {
+        ("wallet-balance", Some(sub_arg_matches)) => {
             let wallet_address = sub_arg_matches
                 .value_of("wallet_address")
                 .map(|v| v.to_string());
@@ -427,7 +418,11 @@ async fn main() -> CommandResult {
             let output_format = app_matches.value_of("output_format");
             command_upload(&arweave, glob_str, log_dir, tags, output_format, buffer).await
         }
-        ("list-statuses", Some(sub_arg_matches)) => {
+        ("get-raw-status", Some(sub_arg_matches)) => {
+            let id = sub_arg_matches.value_of("id").unwrap();
+            command_get_raw_status(&arweave, id).await
+        }
+        ("list-status", Some(sub_arg_matches)) => {
             let glob_str = sub_arg_matches.value_of("glob").unwrap();
             let log_dir = sub_arg_matches.value_of("log_dir").unwrap();
 
@@ -449,18 +444,19 @@ async fn main() -> CommandResult {
             )
             .await
         }
-        ("get-raw-status", Some(sub_arg_matches)) => {
-            let id = sub_arg_matches.value_of("id").unwrap();
-            command_get_raw_status(&arweave, id).await
-        }
-        ("update-statuses", Some(sub_arg_matches)) => {
+        ("update-status", Some(sub_arg_matches)) => {
             let glob_str = sub_arg_matches.value_of("glob").unwrap();
             let log_dir = sub_arg_matches.value_of("log_dir").unwrap();
             let output_format = app_matches.value_of("output_format");
             let buffer = app_matches.value_of("buffer");
             command_update_statuses(&arweave, glob_str, log_dir, output_format, buffer).await
         }
-        ("re-upload", Some(sub_arg_matches)) => {
+        ("status-report", Some(sub_arg_matches)) => {
+            let glob_str = sub_arg_matches.value_of("glob").unwrap();
+            let log_dir = sub_arg_matches.value_of("log_dir").unwrap();
+            command_status_report(&arweave, glob_str, log_dir).await
+        }
+        ("upload-filter", Some(sub_arg_matches)) => {
             let glob_str = sub_arg_matches.value_of("glob").unwrap();
             let log_dir = sub_arg_matches.value_of("log_dir").unwrap();
 
@@ -472,13 +468,15 @@ async fn main() -> CommandResult {
 
             let min_confirms = sub_arg_matches.value_of("min_confirms");
             let output_format = app_matches.value_of("output_format");
-            command_list_statuses(
+            let buffer = app_matches.value_of("buffer");
+            command_upload_filter(
                 &arweave,
                 glob_str,
                 log_dir,
                 statuses,
                 min_confirms,
                 output_format,
+                buffer,
             )
             .await
         }
@@ -486,12 +484,16 @@ async fn main() -> CommandResult {
     }
 }
 
-async fn command_price(arweave: &Arweave, bytes: &usize) -> CommandResult {
-    let (winstons_per_bytes, usd_per_ar) = arweave.get_price(bytes).await?;
+async fn command_get_cost(arweave: &Arweave, glob_str: &str) -> CommandResult {
+    let paths_iter = glob(glob_str)?.filter_map(Result::ok);
+    let (count, total) =
+        paths_iter.fold((0, 0), |(c, t), p| (c + 1, t + p.metadata().unwrap().len()));
+
+    let (winstons_per_bytes, usd_per_ar) = arweave.get_price(&total).await?;
     let usd_per_kb = (&winstons_per_bytes * &usd_per_ar).to_f32().unwrap() / 1e14_f32;
     println!(
-        "The price to upload {} bytes to {} is {} {} (${}).",
-        bytes, arweave.name, winstons_per_bytes, arweave.units, usd_per_kb
+        "The price to upload {} files with {} total bytes is {} {} (${}).",
+        count, total, winstons_per_bytes, arweave.units, usd_per_kb
     );
     Ok(())
 }
@@ -514,7 +516,7 @@ async fn command_wallet_balance(
     arweave: &Arweave,
     wallet_address: Option<String>,
 ) -> CommandResult {
-    let mb = u32::pow(1024, 2) as usize;
+    let mb = u64::pow(1024, 2);
     let result = tokio::join!(
         arweave.get_wallet_balance(wallet_address),
         arweave.get_price(&mb)
@@ -542,7 +544,7 @@ async fn command_upload(
     arweave: &Arweave,
     glob_str: &str,
     log_dir: Option<&str>,
-    tags: Option<Vec<Tag>>,
+    _tags: Option<Vec<Tag>>,
     output_format: Option<&str>,
     buffer: Option<&str>,
 ) -> CommandResult {
@@ -557,7 +559,7 @@ async fn command_upload(
     while let Some(Ok(status)) = stream.next().await {
         if counter == 0 {
             if let Some(log_dir) = &log_dir {
-                println!("Logging statuses to {}", log_dir.display());
+                println!("Logging statuses to {}", &log_dir.display());
             }
             println!("{}", Status::header_string(&output_format));
         }
@@ -568,8 +570,10 @@ async fn command_upload(
         println!("The pattern \"{}\" didn't match any files.", glob_str);
     } else {
         println!(
-            "Uploaded {} files. Run `update-statuses` to confirm acceptance.",
-            counter
+            "Uploaded {} files. Run `update-status {} --log-dir {} to confirm transaction(s).",
+            counter,
+            glob_str,
+            &log_dir.unwrap_or(PathBuf::from("")).display()
         );
     }
 
@@ -602,9 +606,9 @@ async fn command_list_statuses(
         counter += 1;
     }
     if counter == 0 {
-        println!("Didn't match any statuses.");
+        println!("Didn't find match any statuses.");
     } else {
-        println!("Found {} files matching search criteria.", counter);
+        println!("Found {} files matching filter criteria.", counter);
     }
     Ok(())
 }
@@ -640,6 +644,17 @@ async fn command_update_statuses(
     Ok(())
 }
 
+async fn command_status_report(arweave: &Arweave, glob_str: &str, log_dir: &str) -> CommandResult {
+    let paths_iter = glob(glob_str)?.filter_map(Result::ok);
+    let log_dir = PathBuf::from(log_dir);
+
+    let summary = arweave.status_summary(paths_iter, log_dir).await?;
+
+    println!("{}", summary);
+
+    Ok(())
+}
+
 async fn command_upload_filter(
     arweave: &Arweave,
     glob_str: &str,
@@ -647,28 +662,45 @@ async fn command_upload_filter(
     statuses: Option<Vec<StatusCode>>,
     min_confirms: Option<&str>,
     output_format: Option<&str>,
+    buffer: Option<&str>,
 ) -> CommandResult {
     let paths_iter = glob(glob_str)?.filter_map(Result::ok);
     let log_dir = PathBuf::from(log_dir);
     let output_format = get_output_format(output_format.unwrap_or(""));
     let min_confirms = min_confirms.map(|m| m.parse::<u64>().unwrap());
+    let buffer = buffer.map(|b| b.parse::<usize>().unwrap()).unwrap_or(1);
 
-    let mut counter = 0;
-    for status in arweave
+    // Should be refactored to be included in the stream.
+    let filtered_paths_iter = arweave
         .filter_statuses(paths_iter, log_dir.clone(), statuses, min_confirms)
         .await?
-        .iter()
-    {
+        .into_iter()
+        .filter_map(|f| f.file_path);
+
+    let mut stream = upload_files_stream(
+        arweave,
+        filtered_paths_iter,
+        Some(log_dir.clone()),
+        None,
+        None,
+        buffer,
+    );
+
+    let mut counter = 0;
+    while let Some(Ok(status)) = stream.next().await {
         if counter == 0 {
             println!("{}", Status::header_string(&output_format));
         }
-        print!("{}", output_format.formatted_string(status));
+        print!("{}", output_format.formatted_string(&status));
         counter += 1;
     }
     if counter == 0 {
-        println!("Didn't match any statuses.");
+        println!("Didn't find match any statuses.");
     } else {
-        println!("Found {} files matching search criteria.", counter);
+        println!(
+            "Uploaded {} files. Run `update-statuses` to confirm acceptance.",
+            counter
+        );
     }
     Ok(())
 }

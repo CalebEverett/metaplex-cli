@@ -1,7 +1,7 @@
 use crate::transaction::Base64;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::{fmt, path::PathBuf};
+use std::{cmp::Eq, fmt, hash::Hash, path::PathBuf};
 
 const STRFTIME: &str = "%Y-%m-%d %H:%M:%S";
 
@@ -13,7 +13,7 @@ pub struct RawStatus {
     pub number_of_confirmations: u64,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone, Eq, Hash)]
 pub enum StatusCode {
     #[default]
     Submitted,
@@ -21,6 +21,18 @@ pub enum StatusCode {
     Confirmed,
     NotFound,
 }
+
+impl std::fmt::Display for StatusCode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            StatusCode::Submitted => write!(f, "Submitted"),
+            StatusCode::Pending => write!(f, "Pending"),
+            StatusCode::Confirmed => write!(f, "Confirmed"),
+            StatusCode::NotFound => write!(f, "NotFound"),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Status {
     pub id: Base64,
@@ -57,7 +69,7 @@ impl std::fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(
             f,
-            " {:<20}  {}  {:<9?}  {:>8}",
+            " {:<30}  {}  {:<9?}  {:>8}",
             self.file_path
                 .as_ref()
                 .map(|f| f.display().to_string())
@@ -97,12 +109,12 @@ impl VerboseDisplay for Status {
             self.last_modified.format(STRFTIME).to_string()
         )?;
         if let Some(raw_status) = &self.raw_status {
-            writeln!(w, "{:<15}: {}", "height:", raw_status.block_height)?;
-            writeln!(w, "{:<15}: {}", "indep_hash:", raw_status.block_indep_hash)?;
+            writeln!(w, "{:<15} {}", "height:", raw_status.block_height)?;
+            writeln!(w, "{:<15} {}", "indep_hash:", raw_status.block_indep_hash)?;
             writeln!(
                 w,
-                "{:<15}: {}",
-                "confirms", raw_status.number_of_confirmations
+                "{:<15} {}",
+                "confirms:", raw_status.number_of_confirmations
             )?;
         };
         writeln!(w, "")
@@ -114,7 +126,7 @@ impl OutputHeader<Status> for Status {
         match output_format {
             OutputFormat::Display => {
                 format!(
-                    " {:<20}  {:<43}  {:<9}  {}\n{:-<90}",
+                    " {:<30}  {:<43}  {:<9}  {}\n{:-<97}",
                     "path", "id", "status", "confirms", ""
                 )
             }

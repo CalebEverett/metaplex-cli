@@ -13,6 +13,8 @@ pub enum ArweaveError {
     Base64Decode(#[from] DecodeError),
     #[error("unhandled boxed dyn error {0}")]
     BoxedDynStd(#[from] Box<dyn std::error::Error>),
+    #[error("formatting error")]
+    FormatError(#[from] std::fmt::Error),
     #[error("from utf8: {0}")]
     FromUtf8(#[from] FromUtf8Error),
     #[error("glob patters: {0}")]

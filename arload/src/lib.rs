@@ -14,7 +14,7 @@ use reqwest::{
     StatusCode as ResponseStatusCode,
 };
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, str::FromStr};
+use std::{collections::HashMap, fmt::Write, path::PathBuf, str::FromStr};
 use tokio::fs;
 use url::Url;
 
@@ -89,7 +89,7 @@ pub trait Methods<T> {
 
     async fn get_wallet_balance(&self, wallet_address: Option<String>) -> Result<BigUint, Error>;
 
-    async fn get_price(&self, bytes: &usize) -> Result<(BigUint, BigUint), Error>;
+    async fn get_price(&self, bytes: &u64) -> Result<(BigUint, BigUint), Error>;
 
     async fn get_transaction(&self, id: &Base64) -> Result<Transaction, Error>;
 
@@ -120,6 +120,10 @@ pub trait Methods<T> {
         paths_iter: IP,
         log_dir: PathBuf,
     ) -> Result<Vec<Status>, Error>
+    where
+        IP: Iterator<Item = PathBuf> + Send;
+
+    async fn status_summary<IP>(&self, paths_iter: IP, log_dir: PathBuf) -> Result<String, Error>
     where
         IP: Iterator<Item = PathBuf> + Send;
 
@@ -195,7 +199,7 @@ impl Methods<Arweave> for Arweave {
 
     /// Returns price of uploading data to the network in winstons and usd per AR
     /// as a BigUint with two decimals.
-    async fn get_price(&self, bytes: &usize) -> Result<(BigUint, BigUint), Error> {
+    async fn get_price(&self, bytes: &u64) -> Result<(BigUint, BigUint), Error> {
         let url = self.base_url.join("price/")?.join(&bytes.to_string())?;
         let winstons_per_bytes = reqwest::get(url).await?.json::<u64>().await?;
         let winstons_per_bytes = BigUint::from(winstons_per_bytes);
@@ -258,8 +262,9 @@ impl Methods<Arweave> for Arweave {
         };
 
         // Fetch and set reward if not provided (primarily for testing).
+        let bytes_len: u64 = data.len() as u64;
         let reward = reward.unwrap_or({
-            let (winstons_per_bytes, _) = self.get_price(&data.len()).await?;
+            let (winstons_per_bytes, _) = self.get_price(&bytes_len).await?;
             winstons_per_bytes.to_u64_digits()[0]
         });
 
@@ -375,6 +380,40 @@ impl Methods<Arweave> for Arweave {
         IP: Iterator<Item = PathBuf> + Send,
     {
         try_join_all(paths_iter.map(|p| self.read_status(p, log_dir.clone()))).await
+    }
+
+    async fn status_summary<IP>(&self, paths_iter: IP, log_dir: PathBuf) -> Result<String, Error>
+    where
+        IP: Iterator<Item = PathBuf> + Send,
+    {
+        let statuses = self.read_statuses(paths_iter, log_dir).await?;
+        let status_counts: HashMap<StatusCode, u32> =
+            statuses
+                .into_iter()
+                .fold(HashMap::new(), |mut map, status| {
+                    *map.entry(status.status).or_insert(0) += 1;
+                    map
+                });
+
+        let mut total = 0;
+        let mut output = String::new();
+        writeln!(output, " {:<15}  {:>10}", "status", "count")?;
+        writeln!(output, "{:-<29}", "")?;
+        for k in vec![
+            StatusCode::Submitted,
+            StatusCode::Pending,
+            StatusCode::NotFound,
+            StatusCode::Confirmed,
+        ] {
+            let v = status_counts.get(&k).unwrap_or(&0);
+            writeln!(output, " {:<16} {:>10}", &k.to_string(), v)?;
+            total += v;
+        }
+
+        writeln!(output, "{:-<29}", "")?;
+        writeln!(output, " {:<15}  {:>10}", "Total", total)?;
+
+        Ok(output)
     }
 
     async fn update_status(&self, file_path: PathBuf, log_dir: PathBuf) -> Result<Status, Error> {
