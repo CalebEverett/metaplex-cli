@@ -875,6 +875,7 @@ fn get_filtered_program_accounts(config: &Config, address: Pubkey) -> CommandRes
             encoding: Some(UiAccountEncoding::Base64),
             data_slice: None,
             commitment: Some(config.rpc_client.commitment()),
+            min_context_slot: None,
         },
         with_context: Some(false),
     };
